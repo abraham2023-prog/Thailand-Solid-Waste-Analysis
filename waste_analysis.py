@@ -3,14 +3,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.model_selection import LeaveOneOut, train_test_split
-from skopt import BayesSearchCV
-from imblearn.ensemble import BalancedBaggingClassifier
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import LeaveOneOut, cross_val_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.inspection import PartialDependenceDisplay
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classification_report
 import os
-import matplotlib.pyplot as plt
 
 # Build the absolute path to the CSV file
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -44,16 +41,15 @@ def load_and_prepare_data():
         st.error(f"Data loading failed: {str(e)}")
         return None
 
-# Bayesian-optimized modeling
+# Optimized modeling without external dependencies
 @st.cache_resource
-def train_bayesian_models():
+def train_optimized_models():
     try:
         df = load_and_prepare_data()
         if df is None:
             return None
             
         models = {}
-        loo = LeaveOneOut()
         
         for target in ['Food_Waste', 'Gen_Waste']:  # Focus on key targets
             X = df.drop(columns=['Recycl_Waste', 'Hazard_Waste'])  # Remove other targets
@@ -61,35 +57,31 @@ def train_bayesian_models():
                 X = X.drop(columns=[target])
             y = df[target]
             
-            # Bayesian Ridge Regression
-            ridge_opt = BayesSearchCV(
-                Ridge(),
-                {
-                    'alpha': (1e-6, 1e+6, 'log-uniform')
-                },
-                n_iter=32,
-                cv=loo,
-                random_state=42
-            )
-            ridge_opt.fit(X, y)
+            # Robust Regression with LOOCV
+            ridge = Ridge(alpha=1.0)  # Default regularization
+            loo_scores = cross_val_score(ridge, X, y, cv=LeaveOneOut(), scoring='r2')
+            
+            # Final model
+            ridge.fit(X, y)
             
             # Balanced Classification
             median_val = y.median()
             y_clf = (y > median_val).astype(int)
             
-            bbc = BalancedBaggingClassifier(
-                estimator=LogisticRegression(max_iter=1000, class_weight='balanced'),
-                n_estimators=20,
-                random_state=42,
-                sampling_strategy='auto'
-            )
-            bbc.fit(X, y_clf)
+            # Simple Random Forest for better small-data performance
+            rf = RandomForestRegressor(n_estimators=50, random_state=42)
+            rf.fit(X, y)
+            
+            logreg = LogisticRegression(class_weight='balanced', max_iter=1000)
+            logreg.fit(X, y_clf)
             
             models[target] = {
-                'regressor': ridge_opt.best_estimator_,
-                'classifier': bbc,
+                'regressor': ridge,
+                'rf_regressor': rf,
+                'classifier': logreg,
                 'features': X.columns.tolist(),
                 'median': median_val,
+                'loo_r2': np.mean(loo_scores),
                 'X': X,
                 'y': y,
                 'y_clf': y_clf
@@ -103,9 +95,9 @@ def train_bayesian_models():
 
 def main():
     st.set_page_config(layout="wide")
-    st.title("🇹🇭 Small-Data Waste Prediction System")
+    st.title("🇹🇭 Waste Prediction (Optimized for Small Data)")
     
-    models = train_bayesian_models()
+    models = train_optimized_models()
     if models is None:
         st.stop()
     
@@ -139,8 +131,9 @@ def main():
             # Prepare input
             X_input = pd.DataFrame([input_data])
             
-            # Regression prediction
-            reg_pred = model['regressor'].predict(X_input)[0]
+            # Regression predictions
+            ridge_pred = model['regressor'].predict(X_input)[0]
+            rf_pred = model['rf_regressor'].predict(X_input)[0]
             
             # Classification prediction
             clf_pred = model['classifier'].predict(X_input)[0]
@@ -151,12 +144,9 @@ def main():
             
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("Regression Prediction", f"{reg_pred:.2f} tons/day")
+                st.metric("Ridge Regression", f"{ridge_pred:.2f} tons/day")
+                st.metric("Random Forest", f"{rf_pred:.2f} tons/day")
                 st.write(f"Median threshold: {model['median']:.2f} tons/day")
-                
-                # Uncertainty estimation
-                if hasattr(model['regressor'], 'alpha'):
-                    st.write(f"Model regularization (alpha): {model['regressor'].alpha:.4f}")
                 
             with col2:
                 st.metric("Classification", 
@@ -177,37 +167,24 @@ def main():
         model = models[target]
         
         # Regression Analysis
-        st.subheader("Bayesian Ridge Regression")
-        y_pred = model['regressor'].predict(model['X'])
-        st.write(f"LOO Cross-Validated R²: {r2_score(model['y'], y_pred):.3f}")
-        st.write(f"Mean Squared Error: {mean_squared_error(model['y'], y_pred):.3f}")
-        
-        # Partial Dependence Plot
-        st.write("### Partial Dependence (Top 2 Features)")
-        fig, ax = plt.subplots(figsize=(10, 4))
-        PartialDependenceDisplay.from_estimator(
-            model['regressor'],
-            model['X'],
-            features=[0, 1],
-            ax=ax
-        )
-        st.pyplot(fig)
-        
-        # Classification Analysis
-        st.subheader("Balanced Classification")
-        y_clf_pred = model['classifier'].predict(model['X'])
-        st.write(f"Accuracy: {accuracy_score(model['y_clf'], y_clf_pred):.3f}")
-        st.write("#### Classification Report:")
-        st.text(classification_report(model['y_clf'], y_clf_pred))
+        st.subheader("Regression Performance")
+        st.write(f"Leave-One-Out R²: {model['loo_r2']:.3f}")
         
         # Feature Importance
-        st.write("### Feature Importance")
+        st.write("### Feature Importance (Ridge Regression)")
         if hasattr(model['regressor'], 'coef_'):
             coefs = pd.DataFrame({
                 'Feature': model['features'],
                 'Coefficient': model['regressor'].coef_
             }).sort_values('Coefficient', key=abs, ascending=False)
             st.dataframe(coefs.style.format({'Coefficient': '{:.4f}'}))
+        
+        # Classification Analysis
+        st.subheader("Classification Performance")
+        y_clf_pred = model['classifier'].predict(model['X'])
+        st.write(f"Accuracy: {accuracy_score(model['y_clf'], y_clf_pred):.3f}")
+        st.write("#### Classification Report:")
+        st.text(classification_report(model['y_clf'], y_clf_pred))
     
     with tab3:
         st.header("Data Exploration")
@@ -217,7 +194,7 @@ def main():
         
         st.write("### Correlation Matrix")
         corr = df.corr()
-        st.dataframe(corr.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1).format("{:.2f}"))
+        st.dataframe(corr.style.format("{:.2f}"))
         
         st.write("### Download Prepared Data")
         csv = df.to_csv(index=False).encode('utf-8')
@@ -229,5 +206,4 @@ def main():
         )
 
 if __name__ == "__main__":
-    plt.style.use('ggplot')
     main()
