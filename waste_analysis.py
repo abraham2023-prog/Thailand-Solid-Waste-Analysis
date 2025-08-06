@@ -200,15 +200,15 @@ def main():
         st.subheader("Random Forest Classifier")
         st.write(f"Accuracy: {model_info['rf_clf_acc']:.3f}")
         
-        # Confusion Matrix using Streamlit's native chart
+        # Simple confusion matrix display without styling
         st.write("#### Confusion Matrix (Logistic Regression)")
         y_true = model_info['y_test_clf']
         y_pred = model_info['y_pred_clf']
         cm = confusion_matrix(y_true, y_pred)
         cm_df = pd.DataFrame(cm, 
-                            columns=['Predicted Low', 'Predicted High'],
-                            index=['Actual Low', 'Actual High'])
-        st.dataframe(cm_df.style.background_gradient(cmap='Blues'))
+                           columns=['Predicted Low', 'Predicted High'],
+                           index=['Actual Low', 'Actual High'])
+        st.table(cm_df)
     
     with tab3:
         st.header("Data Exploration")
@@ -218,7 +218,7 @@ def main():
         
         st.write("### Correlation Matrix")
         numeric_cols = df.select_dtypes(include=[np.number]).columns
-        st.dataframe(df[numeric_cols].corr().style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1))
+        st.table(df[numeric_cols].corr())
         
         st.write("### Download Data")
         csv = df.to_csv(index=False).encode('utf-8')
