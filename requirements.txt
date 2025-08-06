@@ -1,6 +1,5 @@
 streamlit==1.23.1
 pandas==1.3.5
 numpy==1.21.6
-plotly==5.18.0
 scikit-learn==1.0.2
-matplotlib==3.5.3  # Only if you use background_gradient
+statsmodels==0.13.5
