@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import Ridge, LogisticRegression
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import LeaveOneOut, cross_val_score
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classification_report
@@ -41,24 +41,25 @@ def load_and_prepare_data():
         st.error(f"Data loading failed: {str(e)}")
         return None
 
-# Optimized modeling without external dependencies
+# Optimized modeling for all waste types
 @st.cache_resource
-def train_optimized_models():
+def train_all_waste_models():
     try:
         df = load_and_prepare_data()
         if df is None:
             return None
             
         models = {}
+        waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
         
-        for target in ['Food_Waste', 'Gen_Waste']:  # Focus on key targets
-            X = df.drop(columns=['Recycl_Waste', 'Hazard_Waste'])  # Remove other targets
-            if target in X.columns:
-                X = X.drop(columns=[target])
+        for target in waste_targets:
+            # Prepare features - exclude other waste types to prevent leakage
+            other_targets = [wt for wt in waste_targets if wt != target]
+            X = df.drop(columns=other_targets)
             y = df[target]
             
             # Robust Regression with LOOCV
-            ridge = Ridge(alpha=1.0)  # Default regularization
+            ridge = Ridge(alpha=1.0)
             loo_scores = cross_val_score(ridge, X, y, cv=LeaveOneOut(), scoring='r2')
             
             # Final model
@@ -68,17 +69,19 @@ def train_optimized_models():
             median_val = y.median()
             y_clf = (y > median_val).astype(int)
             
-            # Simple Random Forest for better small-data performance
-            rf = RandomForestRegressor(n_estimators=50, random_state=42)
-            rf.fit(X, y)
+            # Random Forest models
+            rf_reg = RandomForestRegressor(n_estimators=50, random_state=42)
+            rf_reg.fit(X, y)
             
-            logreg = LogisticRegression(class_weight='balanced', max_iter=1000)
-            logreg.fit(X, y_clf)
+            rf_clf = RandomForestClassifier(n_estimators=50, 
+                                          class_weight='balanced',
+                                          random_state=42)
+            rf_clf.fit(X, y_clf)
             
             models[target] = {
-                'regressor': ridge,
-                'rf_regressor': rf,
-                'classifier': logreg,
+                'ridge_regressor': ridge,
+                'rf_regressor': rf_reg,
+                'rf_classifier': rf_clf,
                 'features': X.columns.tolist(),
                 'median': median_val,
                 'loo_r2': np.mean(loo_scores),
@@ -95,9 +98,9 @@ def train_optimized_models():
 
 def main():
     st.set_page_config(layout="wide")
-    st.title("🇹🇭 Waste Prediction (Optimized for Small Data)")
+    st.title("🇹🇭 Comprehensive Waste Prediction System")
     
-    models = train_optimized_models()
+    models = train_all_waste_models()
     if models is None:
         st.stop()
     
@@ -108,7 +111,7 @@ def main():
     tab1, tab2, tab3 = st.tabs(["Predict", "Analyze", "Data"])
     
     with tab1:
-        st.header("Make Predictions")
+        st.header("Make Predictions for All Waste Types")
         
         target = st.selectbox("Select Waste Type", options=list(models.keys()))
         model = models[target]
@@ -118,34 +121,35 @@ def main():
         
         # Dynamically create sliders for each feature
         for i, feature in enumerate(model['features']):
-            with cols[i % 3]:
-                input_data[feature] = st.slider(
-                    feature,
-                    float(df[feature].min()),
-                    float(df[feature].max()),
-                    float(df[feature].median()),
-                    help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
-                )
+            if feature in df.columns:  # Only show features that exist in data
+                with cols[i % 3]:
+                    input_data[feature] = st.slider(
+                        feature,
+                        float(df[feature].min()),
+                        float(df[feature].max()),
+                        float(df[feature].median()),
+                        help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
+                    )
         
         if st.button("Predict"):
             # Prepare input
             X_input = pd.DataFrame([input_data])
             
             # Regression predictions
-            ridge_pred = model['regressor'].predict(X_input)[0]
+            ridge_pred = model['ridge_regressor'].predict(X_input)[0]
             rf_pred = model['rf_regressor'].predict(X_input)[0]
             
             # Classification prediction
-            clf_pred = model['classifier'].predict(X_input)[0]
-            clf_proba = model['classifier'].predict_proba(X_input)[0]
+            clf_pred = model['rf_classifier'].predict(X_input)[0]
+            clf_proba = model['rf_classifier'].predict_proba(X_input)[0]
             
             # Display results
-            st.success("### Prediction Results")
+            st.success(f"### {target.replace('_', ' ')} Prediction Results")
             
             col1, col2 = st.columns(2)
             with col1:
                 st.metric("Ridge Regression", f"{ridge_pred:.2f} tons/day")
-                st.metric("Random Forest", f"{rf_pred:.2f} tons/day")
+                st.metric("Random Forest Regression", f"{rf_pred:.2f} tons/day")
                 st.write(f"Median threshold: {model['median']:.2f} tons/day")
                 
             with col2:
@@ -161,27 +165,32 @@ def main():
                 st.bar_chart(class_dist.T)
     
     with tab2:
-        st.header("Model Analysis")
+        st.header("Model Analysis for All Waste Types")
         
         target = st.selectbox("Select Waste Type", options=list(models.keys()), key='analysis_select')
         model = models[target]
         
         # Regression Analysis
         st.subheader("Regression Performance")
-        st.write(f"Leave-One-Out R²: {model['loo_r2']:.3f}")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Leave-One-Out R²", f"{model['loo_r2']:.3f}")
+        with col2:
+            y_pred = model['ridge_regressor'].predict(model['X'])
+            st.metric("MSE", f"{mean_squared_error(model['y'], y_pred):.3f}")
         
         # Feature Importance
         st.write("### Feature Importance (Ridge Regression)")
-        if hasattr(model['regressor'], 'coef_'):
+        if hasattr(model['ridge_regressor'], 'coef_'):
             coefs = pd.DataFrame({
                 'Feature': model['features'],
-                'Coefficient': model['regressor'].coef_
+                'Coefficient': model['ridge_regressor'].coef_
             }).sort_values('Coefficient', key=abs, ascending=False)
             st.dataframe(coefs.style.format({'Coefficient': '{:.4f}'}))
         
         # Classification Analysis
         st.subheader("Classification Performance")
-        y_clf_pred = model['classifier'].predict(model['X'])
+        y_clf_pred = model['rf_classifier'].predict(model['X'])
         st.write(f"Accuracy: {accuracy_score(model['y_clf'], y_clf_pred):.3f}")
         st.write("#### Classification Report:")
         st.text(classification_report(model['y_clf'], y_clf_pred))
@@ -189,19 +198,19 @@ def main():
     with tab3:
         st.header("Data Exploration")
         
-        st.write("### Dataset Statistics")
-        st.dataframe(df.describe().style.format("{:.2f}"))
+        st.write("### All Waste Types Distribution")
+        waste_cols = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
+        st.dataframe(df[waste_cols].describe().style.format("{:.2f}"))
         
-        st.write("### Correlation Matrix")
-        corr = df.corr()
-        st.dataframe(corr.style.format("{:.2f}"))
+        st.write("### Correlation Matrix (Waste Types)")
+        st.dataframe(df[waste_cols].corr().style.background_gradient(cmap='Blues').format("{:.2f}"))
         
-        st.write("### Download Prepared Data")
+        st.write("### Download Full Data")
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download CSV",
             data=csv,
-            file_name="optimized_waste_data.csv",
+            file_name="all_waste_data.csv",
             mime="text/csv"
         )
 
