@@ -2,10 +2,9 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import Ridge, LogisticRegression
+from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import LeaveOneOut, cross_val_score
-from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classification_report
 import os
 
@@ -159,10 +158,10 @@ def main():
                 
                 # Show class distribution
                 class_dist = pd.DataFrame({
-                    'Low Waste': [sum(model['y_clf'] == 0)],
-                    'High Waste': [sum(model['y_clf'] == 1)]
+                    'Count': [sum(model['y_clf'] == 0), sum(model['y_clf'] == 1)],
+                    'Waste Level': ['Low Waste', 'High Waste']
                 })
-                st.bar_chart(class_dist.T)
+                st.bar_chart(class_dist.set_index('Waste Level'))
     
     with tab2:
         st.header("Model Analysis for All Waste Types")
@@ -202,8 +201,9 @@ def main():
         waste_cols = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
         st.dataframe(df[waste_cols].describe().style.format("{:.2f}"))
         
-        st.write("### Correlation Matrix (Waste Types)")
-        st.dataframe(df[waste_cols].corr().style.background_gradient(cmap='Blues').format("{:.2f}"))
+        st.write("### Correlation Between Waste Types")
+        # Simple correlation table without styling
+        st.table(df[waste_cols].corr().round(2))
         
         st.write("### Download Full Data")
         csv = df.to_csv(index=False).encode('utf-8')
