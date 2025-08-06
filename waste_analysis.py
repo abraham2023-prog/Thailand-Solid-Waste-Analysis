@@ -2,16 +2,13 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_squared_error, accuracy_score
+from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, confusion_matrix
 from sklearn.preprocessing import StandardScaler
-import statsmodels.api as sm
 import os
-from io import BytesIO
+from io import StringIO
 
 # Build the absolute path to the CSV file
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -117,8 +114,7 @@ def train_models():
 
 def main():
     st.set_page_config(layout="wide")
-    st.title("🇹🇭 Advanced Waste Prediction System")
-    st.write("Predicts waste generation with multiple models and detailed analytics")
+    st.title("🇹🇭 Waste Prediction Dashboard")
     
     models = train_models()
     if models is None:
@@ -128,75 +124,35 @@ def main():
     if df is None:
         st.stop()
     
-    tab1, tab2, tab3, tab4 = st.tabs(["Prediction", "Model Analytics", "Data Exploration", "Download"])
+    tab1, tab2, tab3 = st.tabs(["Prediction", "Model Info", "Data"])
     
     with tab1:
-        st.header("Waste Prediction")
+        st.header("Make Predictions")
         
         with st.form("prediction_form"):
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                pop = st.slider(
-                    "Population", 
-                    float(df['Pop'].min()), 
-                    float(df['Pop'].max()), 
-                    float(df['Pop'].median()),
-                    help="Total population in the area"
-                )
-                gpp_per_capita = st.slider(
-                    "GPP per Capita", 
-                    float(df['GPP_per_Capita'].min()), 
-                    float(df['GPP_per_Capita'].max()), 
-                    float(df['GPP_per_Capita'].median()),
-                    help="Gross Provincial Product per capita"
-                )
-                gpp_industrial = st.slider(
-                    "Industrial GDP %", 
-                    float(df['GPP_Industrial(%)'].min()), 
-                    float(df['GPP_Industrial(%)'].max()), 
-                    float(df['GPP_Industrial(%)'].median()),
-                    help="Percentage of GDP from industrial sector"
-                )
+                pop = st.slider("Population", float(df['Pop'].min()), float(df['Pop'].max()), float(df['Pop'].median()),
+                              help="Total population in the area")
+                gpp_per_capita = st.slider("GPP per Capita", float(df['GPP_per_Capita'].min()), float(df['GPP_per_Capita'].max()), float(df['GPP_per_Capita'].median()),
+                                          help="Gross Provincial Product per capita")
+                gpp_industrial = st.slider("Industrial GDP %", float(df['GPP_Industrial(%)'].min()), float(df['GPP_Industrial(%)'].max()), float(df['GPP_Industrial(%)'].median()),
+                                         help="Percentage of GDP from industrial sector")
                 
             with col2:
-                visitors = st.slider(
-                    "Visitors", 
-                    float(df['Visitors(ppl)'].min()), 
-                    float(df['Visitors(ppl)'].max()), 
-                    float(df['Visitors(ppl)'].median()),
-                    help="Number of visitors to the area"
-                )
-                gpp_agri = st.slider(
-                    "Agriculture GDP %", 
-                    float(df['GPP_Agriculture(%)'].min()), 
-                    float(df['GPP_Agriculture(%)'].max()), 
-                    float(df['GPP_Agriculture(%)'].median()),
-                    help="Percentage of GDP from agricultural sector"
-                )
-                gpp_services = st.slider(
-                    "Services GDP %", 
-                    float(df['GPP_Services(%)'].min()), 
-                    float(df['GPP_Services(%)'].max()), 
-                    float(df['GPP_Services(%)'].median()),
-                    help="Percentage of GDP from services sector"
-                )
+                visitors = st.slider("Visitors", float(df['Visitors(ppl)'].min()), float(df['Visitors(ppl)'].max()), float(df['Visitors(ppl)'].median()),
+                                   help="Number of visitors to the area")
+                gpp_agri = st.slider("Agriculture GDP %", float(df['GPP_Agriculture(%)'].min()), float(df['GPP_Agriculture(%)'].max()), float(df['GPP_Agriculture(%)'].median()),
+                                    help="Percentage of GDP from agricultural sector")
+                gpp_services = st.slider("Services GDP %", float(df['GPP_Services(%)'].min()), float(df['GPP_Services(%)'].max()), float(df['GPP_Services(%)'].median()),
+                                       help="Percentage of GDP from services sector")
                 
             with col3:
-                age_0_5 = st.slider(
-                    "Age 0-5 %", 
-                    float(df['Age_0_5'].min()), 
-                    float(df['Age_0_5'].max()), 
-                    float(df['Age_0_5'].median()),
-                    help="Percentage of population aged 0-5 years"
-                )
-                msw_gen_rate = st.slider(
-                    "MSW Gen Rate", 
-                    float(df['MSW_GenRate(ton/d)'].min()), 
-                    float(df['MSW_GenRate(ton/d)'].max()), 
-                    float(df['MSW_GenRate(ton/d)'].median()),
-                    help="Municipal solid waste generation rate (tons/day)"
-                )
+                age_0_5 = st.slider("Age 0-5 %", float(df['Age_0_5'].min()), float(df['Age_0_5'].max()), float(df['Age_0_5'].median()),
+                                 help="Percentage of population aged 0-5 years")
+                msw_gen_rate = st.slider("MSW Gen Rate", float(df['MSW_GenRate(ton/d)'].min()), float(df['MSW_GenRate(ton/d)'].max()), float(df['MSW_GenRate(ton/d)'].median()),
+                                      help="Municipal solid waste generation rate (tons/day)")
             
             waste_type = st.selectbox("Select Waste Type", options=list(models.keys()))
             submitted = st.form_submit_button("Predict")
@@ -213,7 +169,6 @@ def main():
                 # Classification prediction
                 scaled_input = models[waste_type]['scaler'].transform(input_data)
                 logreg_pred = models[waste_type]['logreg_classifier'].predict(scaled_input)[0]
-                logreg_proba = models[waste_type]['logreg_classifier'].predict_proba(scaled_input)[0]
                 rf_clf_pred = models[waste_type]['rf_classifier'].predict(input_data)[0]
                 
                 st.success("### Prediction Results")
@@ -221,73 +176,39 @@ def main():
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Random Forest Prediction", f"{reg_pred:.2f} tons/day")
-                    fig, ax = plt.subplots()
-                    ax.bar(['Actual Median', 'Predicted'], 
-                          [models[waste_type]['median'], reg_pred], 
-                          color=['blue', 'orange'])
-                    st.pyplot(fig)
-                
+                    st.write(f"Median value: {models[waste_type]['median']:.2f} tons/day")
+                    
                 with col2:
-                    st.metric("Logistic Regression Classification", 
-                             f"{'High' if logreg_pred == 1 else 'Low'} waste",
-                             f"Confidence: {max(logreg_proba)*100:.1f}%")
-                    st.metric("Random Forest Classification", 
-                             f"{'High' if rf_clf_pred == 1 else 'Low'} waste")
+                    st.metric("Logistic Regression", "High Waste" if logreg_pred == 1 else "Low Waste")
+                    st.metric("Random Forest Classifier", "High Waste" if rf_clf_pred == 1 else "Low Waste")
     
     with tab2:
-        st.header("Model Analytics")
+        st.header("Model Information")
         
         waste_type = st.selectbox("Select Waste Type", options=list(models.keys()), key='model_select')
         model_info = models[waste_type]
         
         st.subheader("Random Forest Regressor")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("R-squared", f"{model_info['reg_r2']:.3f}")
-        with col2:
-            st.metric("MSE", f"{model_info['reg_mse']:.3f}")
-        
-        # Feature Importance
-        st.write("### Feature Importances")
-        importances = pd.DataFrame({
-            'Feature': model_info['features'],
-            'Importance': model_info['rf_regressor'].feature_importances_
-        }).sort_values('Importance', ascending=False)
-        
-        fig, ax = plt.subplots(figsize=(10, 6))
-        sns.barplot(x='Importance', y='Feature', data=importances, ax=ax)
-        ax.set_title('Feature Importances for Random Forest')
-        st.pyplot(fig)
-        
-        # Actual vs Predicted Plot
-        st.write("### Actual vs Predicted Values")
-        fig, ax = plt.subplots()
-        ax.scatter(model_info['y_test'], model_info['y_pred'], alpha=0.5)
-        ax.plot([min(model_info['y_test']), max(model_info['y_test'])], 
-                [min(model_info['y_test']), max(model_info['y_test'])], 
-                'r--')
-        ax.set_xlabel('Actual Values')
-        ax.set_ylabel('Predicted Values')
-        st.pyplot(fig)
+        st.write(f"R-squared: {model_info['reg_r2']:.3f}")
+        st.write(f"MSE: {model_info['reg_mse']:.3f}")
         
         st.subheader("Logistic Regression Classifier")
-        st.metric("Accuracy", f"{model_info['logreg_acc']:.3f}")
-        
-        st.write("### Coefficients")
-        st.dataframe(model_info['logreg_coef'].style.format({'Coefficient': '{:.4f}'}))
-        
-        # Confusion Matrix
-        st.write("### Classification Report")
-        from sklearn.metrics import confusion_matrix
-        cm = confusion_matrix(model_info['y_test_clf'], model_info['y_pred_clf'])
-        fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt='d', ax=ax)
-        ax.set_xlabel('Predicted')
-        ax.set_ylabel('Actual')
-        st.pyplot(fig)
+        st.write(f"Accuracy: {model_info['logreg_acc']:.3f}")
+        st.write("#### Coefficients:")
+        st.dataframe(model_info['logreg_coef'])
         
         st.subheader("Random Forest Classifier")
-        st.metric("Accuracy", f"{model_info['rf_clf_acc']:.3f}")
+        st.write(f"Accuracy: {model_info['rf_clf_acc']:.3f}")
+        
+        # Confusion Matrix using Streamlit's native chart
+        st.write("#### Confusion Matrix (Logistic Regression)")
+        y_true = model_info['y_test_clf']
+        y_pred = model_info['y_pred_clf']
+        cm = confusion_matrix(y_true, y_pred)
+        cm_df = pd.DataFrame(cm, 
+                            columns=['Predicted Low', 'Predicted High'],
+                            index=['Actual Low', 'Actual High'])
+        st.dataframe(cm_df.style.background_gradient(cmap='Blues'))
     
     with tab3:
         st.header("Data Exploration")
@@ -297,76 +218,16 @@ def main():
         
         st.write("### Correlation Matrix")
         numeric_cols = df.select_dtypes(include=[np.number]).columns
-        fig, ax = plt.subplots(figsize=(12, 8))
-        sns.heatmap(df[numeric_cols].corr(), annot=True, fmt='.2f', ax=ax)
-        st.pyplot(fig)
+        st.dataframe(df[numeric_cols].corr().style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1))
         
-        st.write("### Waste Distribution")
-        waste_cols = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
-        fig, ax = plt.subplots(2, 2, figsize=(12, 8))
-        for i, col in enumerate(waste_cols):
-            sns.histplot(df[col], ax=ax[i//2, i%2], kde=True)
-            ax[i//2, i%2].set_title(col)
-        plt.tight_layout()
-        st.pyplot(fig)
-    
-    with tab4:
-        st.header("Download Predictions")
-        
-        waste_type = st.selectbox("Select Waste Type", options=list(models.keys()), key='download_select')
-        
-        # Create prediction dataset
-        X_test = models[waste_type]['X_test']
-        y_test = models[waste_type]['y_test']
-        y_pred = models[waste_type]['rf_regressor'].predict(X_test)
-        
-        results_df = pd.DataFrame({
-            'Actual': y_test,
-            'Predicted': y_pred,
-            'Residual': y_test - y_pred
-        })
-        
-        st.write("### Prediction Results Sample")
-        st.dataframe(results_df.head())
-        
-        # Download buttons
-        csv = results_df.to_csv(index=False).encode('utf-8')
+        st.write("### Download Data")
+        csv = df.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="Download CSV",
             data=csv,
-            file_name=f"{waste_type}_predictions.csv",
-            mime='text/csv'
+            file_name="waste_data.csv",
+            mime="text/csv"
         )
-        
-        # Download all models' predictions
-        if st.button("Download All Predictions"):
-            all_results = {}
-            for wt in models.keys():
-                X_test = models[wt]['X_test']
-                y_test = models[wt]['y_test']
-                y_pred = models[wt]['rf_regressor'].predict(X_test)
-                all_results[wt] = pd.DataFrame({
-                    'Actual': y_test,
-                    'Predicted': y_pred,
-                    'Residual': y_test - y_pred
-                })
-            
-            # Create zip file
-            from zipfile import ZipFile
-            import io
-            
-            zip_buffer = io.BytesIO()
-            with ZipFile(zip_buffer, 'w') as zip_file:
-                for wt, df in all_results.items():
-                    csv_data = df.to_csv(index=False).encode('utf-8')
-                    zip_file.writestr(f"{wt}_predictions.csv", csv_data)
-            
-            st.download_button(
-                label="Download All as ZIP",
-                data=zip_buffer.getvalue(),
-                file_name="all_waste_predictions.zip",
-                mime="application/zip"
-            )
 
 if __name__ == "__main__":
     main()
