@@ -21,7 +21,7 @@ def load_data():
         # Verify required columns exist
         required_cols = [
             'Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste',
-            'Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 'Visitors(ppl)',
+            'Pop_Density', 'GPP_per_Capita', 'GPP_Industrial(%)', 'Visitors(ppl)',
             'GPP_Agriculture(%)', 'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)'
         ]
         if not all(col in df.columns for col in required_cols):
@@ -45,7 +45,7 @@ def train_models():
             
         # Prepare features
         X = df[[
-            'Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 'Visitors(ppl)',
+            'Pop_Density', 'GPP_per_Capita', 'GPP_Industrial(%)', 'Visitors(ppl)',
             'GPP_Agriculture(%)', 'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)'
         ]]
         
@@ -109,9 +109,9 @@ def main():
             with col1:
                 pop = st.slider(
                     "Population",
-                    min_value=float(df['Pop'].min()),
-                    max_value=float(df['Pop'].max()),
-                    value=float(df['Pop'].median()),
+                    min_value=float(df['Pop_Density'].min()),
+                    max_value=float(df['Pop_Density'].max()),
+                    value=float(df['Pop_Density'].median()),
                     step=1000.0
                 )
                 
