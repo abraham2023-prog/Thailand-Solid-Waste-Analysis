@@ -4,15 +4,11 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import Ridge, Lasso
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.model_selection import LeaveOneOut, cross_val_score, train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classification_report
-from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.preprocessing import RobustScaler
 from sklearn.impute import SimpleImputer
 import os
-
-# Configuration to avoid matplotlib dependency for styling
-st.set_option('deprecation.showPyplotGlobalUse', False)
 
 # Build the absolute path to the CSV file
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -113,12 +109,12 @@ def train_all_waste_models():
             ridge = Ridge(alpha=1.0)
             try:
                 # Use KFold instead of LeaveOneOut for more stability
-                loo_scores = cross_val_score(ridge, X_train, y_train, 
-                                           cv=5, scoring='r2')
-                loo_r2 = np.mean(loo_scores)
+                cv_scores = cross_val_score(ridge, X_train, y_train, 
+                                         cv=5, scoring='r2')
+                cv_r2 = np.mean(cv_scores)
             except Exception as e:
                 st.warning(f"Cross-validation failed for {target}: {str(e)}")
-                loo_r2 = np.nan
+                cv_r2 = np.nan
             
             ridge.fit(X_train, y_train)
             ridge_pred = ridge.predict(X_val)
@@ -177,7 +173,7 @@ def train_all_waste_models():
                 'rf_classifier': rf_clf,
                 'features': X.columns.tolist(),
                 'threshold': threshold,
-                'loo_r2': loo_r2,
+                'cv_r2': cv_r2,
                 'val_r2': ridge_r2,
                 'val_mse': ridge_mse,
                 'X_train': X_train,
@@ -285,7 +281,7 @@ def main():
         st.subheader("Regression Performance")
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("5-Fold CV R²", f"{model['loo_r2']:.4f}" if not np.isnan(model['loo_r2']) else "N/A")
+            st.metric("5-Fold CV R²", f"{model['cv_r2']:.4f}" if not np.isnan(model['cv_r2']) else "N/A")
         with col2:
             st.metric("Validation R²", f"{model['val_r2']:.4f}" if not np.isnan(model['val_r2']) else "N/A")
         with col3:
