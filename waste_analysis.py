@@ -1,4 +1,3 @@
-pip install matplotlib
 # -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
@@ -10,13 +9,20 @@ from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classi
 from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.feature_selection import VarianceThreshold
 import os
-import matplotlib.pyplot as plt
+
+# Check for matplotlib availability
+try:
+    import matplotlib.pyplot as plt
+    matplotlib_available = True
+except ImportError:
+    matplotlib_available = False
+    st.warning("Matplotlib is not installed. Some visualizations will be disabled. Please install with: pip install matplotlib")
 
 # Build the absolute path to the CSV file
 script_dir = os.path.dirname(os.path.abspath(__file__))
 csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
 
-# Enhanced data loading with thorough diagnostics
+# Cache data loading with enhanced data quality checks
 @st.cache_data
 def load_and_prepare_data():
     try:
@@ -206,6 +212,13 @@ def train_all_waste_models():
         st.error(f"Model training failed: {str(e)}")
         return None
 
+def plot_with_alternative(fig):
+    """Helper function to handle plotting with/without matplotlib"""
+    if matplotlib_available:
+        st.pyplot(fig)
+    else:
+        st.warning("Plot not available - matplotlib is not installed")
+
 def main():
     st.set_page_config(layout="wide")
     st.title("🇹🇭 Robust Waste Prediction System with Diagnostics")
@@ -326,23 +339,29 @@ def main():
                     'Importance': model['rf_regressor'].feature_importances_
                 }).sort_values('Importance', ascending=False)
                 
-                fig, ax = plt.subplots()
-                ax.barh(importances['Feature'], importances['Importance'])
-                ax.set_xlabel('Importance')
-                ax.set_title('Feature Importances')
-                st.pyplot(fig)
+                if matplotlib_available:
+                    fig, ax = plt.subplots()
+                    ax.barh(importances['Feature'], importances['Importance'])
+                    ax.set_xlabel('Importance')
+                    ax.set_title('Feature Importances')
+                    plot_with_alternative(fig)
+                else:
+                    st.bar_chart(importances.set_index('Feature'))
                 
                 st.dataframe(importances.style.format({'Importance': '{:.6f}'}))
         
         with tab_data:
             st.write("### Target Variable Distribution")
-            fig, ax = plt.subplots()
-            ax.hist(model['y_train'], bins=30)
-            ax.axvline(model['threshold'], color='r', linestyle='--', label='Threshold')
-            ax.set_xlabel(target)
-            ax.set_ylabel('Frequency')
-            ax.legend()
-            st.pyplot(fig)
+            if matplotlib_available:
+                fig, ax = plt.subplots()
+                ax.hist(model['y_train'], bins=30)
+                ax.axvline(model['threshold'], color='r', linestyle='--', label='Threshold')
+                ax.set_xlabel(target)
+                ax.set_ylabel('Frequency')
+                ax.legend()
+                plot_with_alternative(fig)
+            else:
+                st.bar_chart(pd.DataFrame(model['y_train']))
             
             st.write(f"Threshold value: {model['threshold']:.6f}")
             st.write(f"Mean: {np.mean(model['y_train']):.6f}")
@@ -358,14 +377,21 @@ def main():
         
         # Plot predictions
         st.write("### Validation Set Predictions")
-        fig, ax = plt.subplots()
-        ax.scatter(model['y_val'], model['ridge_regressor'].predict(model['X_val']))
-        ax.plot([min(model['y_val']), max(model['y_val'])], 
-               [min(model['y_val']), max(model['y_val'])], 
-               'r--')
-        ax.set_xlabel('Actual')
-        ax.set_ylabel('Predicted')
-        st.pyplot(fig)
+        if matplotlib_available:
+            fig, ax = plt.subplots()
+            ax.scatter(model['y_val'], model['ridge_regressor'].predict(model['X_val']))
+            ax.plot([min(model['y_val']), max(model['y_val'])], 
+                   [min(model['y_val']), max(model['y_val'])], 
+                   'r--')
+            ax.set_xlabel('Actual')
+            ax.set_ylabel('Predicted')
+            plot_with_alternative(fig)
+        else:
+            plot_data = pd.DataFrame({
+                'Actual': model['y_val'],
+                'Predicted': model['ridge_regressor'].predict(model['X_val'])
+            })
+            st.line_chart(plot_data)
     
     with tab3:
         st.header("Data Diagnostics")
@@ -374,32 +400,43 @@ def main():
         waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
                      if col in df.columns]
         
-        fig, axes = plt.subplots(len(waste_cols), 1, figsize=(10, 3*len(waste_cols)))
-        for ax, col in zip(axes, waste_cols):
-            ax.hist(df[col], bins=30)
-            ax.set_title(col)
-        st.pyplot(fig)
+        if matplotlib_available:
+            fig, axes = plt.subplots(len(waste_cols), 1, figsize=(10, 3*len(waste_cols)))
+            for ax, col in zip(axes, waste_cols):
+                ax.hist(df[col], bins=30)
+                ax.set_title(col)
+            plot_with_alternative(fig)
+        else:
+            for col in waste_cols:
+                st.write(f"### {col}")
+                st.bar_chart(df[col])
         
         st.write("### Feature-Target Relationships")
         selected_feature = st.selectbox("Select feature", options=model['features'])
         selected_target = st.selectbox("Select target", options=waste_cols)
         
-        fig, ax = plt.subplots()
-        ax.scatter(df[selected_feature], df[selected_target])
-        ax.set_xlabel(selected_feature)
-        ax.set_ylabel(selected_target)
-        st.pyplot(fig)
+        if matplotlib_available:
+            fig, ax = plt.subplots()
+            ax.scatter(df[selected_feature], df[selected_target])
+            ax.set_xlabel(selected_feature)
+            ax.set_ylabel(selected_target)
+            plot_with_alternative(fig)
+        else:
+            st.write(f"Scatter plot not available - install matplotlib to view")
         
         st.write("### Correlation Matrix")
         corr = df[model['features'] + waste_cols].corr()
-        fig, ax = plt.subplots(figsize=(12, 10))
-        cax = ax.matshow(corr, cmap='coolwarm', vmin=-1, vmax=1)
-        fig.colorbar(cax)
-        ax.set_xticks(range(len(corr.columns)))
-        ax.set_xticklabels(corr.columns, rotation=90)
-        ax.set_yticks(range(len(corr.columns)))
-        ax.set_yticklabels(corr.columns)
-        st.pyplot(fig)
+        if matplotlib_available:
+            fig, ax = plt.subplots(figsize=(12, 10))
+            cax = ax.matshow(corr, cmap='coolwarm', vmin=-1, vmax=1)
+            fig.colorbar(cax)
+            ax.set_xticks(range(len(corr.columns)))
+            ax.set_xticklabels(corr.columns, rotation=90)
+            ax.set_yticks(range(len(corr.columns)))
+            ax.set_yticklabels(corr.columns)
+            plot_with_alternative(fig)
+        else:
+            st.dataframe(corr.style.background_gradient(cmap='coolwarm', vmin=-1, vmax=1))
 
 if __name__ == "__main__":
     main()
