@@ -20,7 +20,7 @@ def load_and_prepare_data():
         
         # 1. Critical feature selection
         waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
-        base_features = ['Pop', 'GPP_Industrial(%)', 
+        base_features = ['Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 
                         'Visitors(ppl)', 'GPP_Agriculture(%)', 
                         'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)']
         
