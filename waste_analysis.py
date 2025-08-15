@@ -11,6 +11,7 @@ from sklearn.preprocessing import RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
+from xgboost import XGBRegressor
 import os
 
 # ----------------------------
