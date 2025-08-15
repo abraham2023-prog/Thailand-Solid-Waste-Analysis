@@ -8,8 +8,9 @@ from sklearn.ensemble import RandomForestRegressor, VotingRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV, RFECV
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler
-from sklearn.impute import SimpleImputer, IterativeImputer
-from xgboost import XGBRegressor
+from sklearn.impute import SimpleImputer
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
 import os
 
 # ----------------------------
