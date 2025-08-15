@@ -3,16 +3,25 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import os
+
+# XGBoost installation workaround
+try:
+    from xgboost import XGBRegressor
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "xgboost==1.7.3"])
+    from xgboost import XGBRegressor
+
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, VotingRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
-from sklearn.feature_selection import RFECV  # Correct import location
+from sklearn.feature_selection import RFECV
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from xgboost import XGBRegressor
-import os
 
 # ----------------------------
 # Page Configuration
@@ -30,9 +39,11 @@ st.set_page_config(
 def load_and_prepare_data():
     try:
         # Load data
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
-        df = pd.read_csv(csv_path)
+        if not os.path.exists('SW_Thailand_2021_Labeled.csv'):
+            st.error("Data file not found! Please ensure SW_Thailand_2021_Labeled.csv is in your app directory")
+            return None
+            
+        df = pd.read_csv('SW_Thailand_2021_Labeled.csv')
         
         # Data Quality Report
         with st.expander("🔍 Initial Data Quality Report", expanded=True):
@@ -50,9 +61,9 @@ def load_and_prepare_data():
         waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
         
         # Feature Engineering
-        base_features = ['Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 
-                       'Visitors(ppl)', 'GPP_Agriculture(%)', 
-                       'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)']
+        base_features = ['Pop', 'GPP_Industrial(%)', 'Visitors(ppl)', 
+                       'GPP_Agriculture(%)', 'GPP_Services(%)', 'Age_0_5', 
+                       'MSW_GenRate(ton/d)']
         
         # Create new features
         if 'Area' in df.columns:
@@ -65,9 +76,8 @@ def load_and_prepare_data():
         base_features.append('Economic_Diversity')
         
         # Add interaction terms
-        df['Population_Economic_Interaction'] = df['Pop'] * df['GPP_per_Capita']
         df['Industrial_Service_Interaction'] = df['GPP_Industrial(%)'] * df['GPP_Services(%)']
-        base_features.extend(['Population_Economic_Interaction', 'Industrial_Service_Interaction'])
+        base_features.extend(['Industrial_Service_Interaction'])
         
         # Handle missing values
         features = [f for f in base_features if f in df.columns]
@@ -86,7 +96,7 @@ def load_and_prepare_data():
         to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
         if to_drop:
             st.warning(f"🚀 Dropping highly correlated features: {to_drop}")
-            features = [f for f in features if f not in to_drop]
+            features = [f for f in features if f not to_drop]
         
         # Final check
         with st.expander("✅ Final Data Quality Report"):
