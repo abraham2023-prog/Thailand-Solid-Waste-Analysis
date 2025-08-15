@@ -1,10 +1,9 @@
-streamlit>=1.23
-pandas==1.5.3
-numpy>=1.24
-scikit-learn==1.2.0
-statsmodels>=0.13
-matplotlib
-plotly==5.11.0
-xgboost==1.7.3
+streamlit>=1.23.0
+pandas>=1.5.3
+numpy>=1.24.0
+scikit-learn>=1.2.0
+plotly>=5.11.0
+xgboost>=1.7.3
+
 
 
