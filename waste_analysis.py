@@ -96,7 +96,7 @@ def load_and_prepare_data():
         to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
         if to_drop:
             st.warning(f"🚀 Dropping highly correlated features: {to_drop}")
-            features = [f for f in features if f not to_drop]
+            features = [f for f in features if f not in to_drop]
         
         # Final check
         with st.expander("✅ Final Data Quality Report"):
