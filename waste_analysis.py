@@ -76,7 +76,7 @@ def enhanced_feature_engineering(df):
     corr_matrix = df[features].corr().abs()
     
     # Select upper triangle of correlation matrix
-    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
     
     # Find features with correlation greater than 0.8
     to_drop = [column for column in upper.columns if any(upper[column] > 0.8)]
