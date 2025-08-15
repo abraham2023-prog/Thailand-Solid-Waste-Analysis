@@ -3,28 +3,30 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import os
+
+# Corrected sklearn imports
 from sklearn.linear_model import Ridge, Lasso
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV, RFECV
+from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
+from sklearn.feature_selection import RFECV  # This is the correct import
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler, PolynomialFeatures
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.pipeline import make_pipeline
-import os
 
 # ----------------------------
 # Page Configuration
 # ----------------------------
 st.set_page_config(
-    page_title="Enhanced Thailand Waste Analysis",
-    page_icon="🗑️",
+    page_title="Thailand Waste Analysis Pro",
+    page_icon="♻️",
     layout="wide"
 )
 
 # ----------------------------
-# Data Loading and Preparation (Updated)
+# Data Loading and Preparation
 # ----------------------------
 @st.cache_data
 def load_and_prepare_data():
@@ -56,18 +58,17 @@ def load_and_prepare_data():
 # Enhanced Feature Engineering
 # ----------------------------
 def enhanced_feature_engineering(df):
-    # Original features
+    # Define targets and features
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     base_features = ['Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 
                    'Visitors(ppl)', 'GPP_Agriculture(%)', 
                    'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)']
     
-    # New feature: Population density
+    # Feature Engineering
     if 'Area' in df.columns:
         df['Population_Density'] = df['Pop'] / df['Area']
         base_features.append('Population_Density')
     
-    # Economic diversity index
     df['Economic_Diversity'] = df[['GPP_Agriculture(%)', 
                                  'GPP_Industrial(%)', 
                                  'GPP_Services(%)']].std(axis=1)
@@ -77,7 +78,7 @@ def enhanced_feature_engineering(df):
     poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
     poly_features = poly.fit_transform(df[['GPP_Industrial(%)', 'GPP_Services(%)', 'Pop']])
     poly_cols = ['Industrial_Service_Interaction', 'Industrial_Pop', 'Service_Pop']
-    df[poly_cols] = poly_features[:, -3:]  # Take only interaction terms
+    df[poly_cols] = poly_features[:, -3:]
     base_features.extend(poly_cols)
     
     # Log transformations
@@ -88,11 +89,11 @@ def enhanced_feature_engineering(df):
     # Handle missing values
     features = [f for f in base_features if f in df.columns]
     
-    # 1. Impute features using median
+    # Impute features
     imputer = SimpleImputer(strategy='median')
     df[features] = imputer.fit_transform(df[features])
     
-    # 2. For waste targets - use iterative imputation
+    # Impute targets
     imputer = IterativeImputer(random_state=42, max_iter=10)
     df[waste_targets] = imputer.fit_transform(df[waste_targets])
     
@@ -104,7 +105,6 @@ def enhanced_feature_engineering(df):
 @st.cache_resource
 def train_enhanced_models(df):
     models = {}
-    df = enhanced_feature_engineering(df)
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
     for target in waste_targets:
@@ -113,8 +113,12 @@ def train_enhanced_models(df):
             y = df[target]
             
             # Feature selection
-            selector = RFECV(RandomForestRegressor(n_estimators=50, random_state=42), 
-                           step=1, cv=5, scoring='r2')
+            selector = RFECV(
+                estimator=RandomForestRegressor(n_estimators=50, random_state=42),
+                step=1,
+                cv=5,
+                scoring='r2'
+            )
             selector.fit(X, y)
             selected_features = X.columns[selector.support_]
             X = X[selected_features]
@@ -124,7 +128,7 @@ def train_enhanced_models(df):
                 X, y, test_size=0.3, random_state=42
             )
             
-            # Model pipelines with hyperparameter tuning
+            # Model training with GridSearchCV
             models[target] = {
                 'features': selected_features.tolist(),
                 'scaler': RobustScaler().fit(X_train),
@@ -134,34 +138,37 @@ def train_enhanced_models(df):
                         {'alpha': np.logspace(-3, 3, 20)},
                         cv=5
                     ).fit(X_train, y_train),
-                    
-                    'rf': GridSearchCV(
+                    'random_forest': GridSearchCV(
                         RandomForestRegressor(random_state=42),
-                        {'n_estimators': [50, 100],
-                         'max_depth': [3, 5, None]},
+                        {
+                            'n_estimators': [50, 100],
+                            'max_depth': [3, 5, None]
+                        },
                         cv=5
                     ).fit(X_train, y_train),
-                    
-                    'gboost': GridSearchCV(
+                    'gradient_boosting': GridSearchCV(
                         GradientBoostingRegressor(random_state=42),
-                        {'n_estimators': [50, 100],
-                         'learning_rate': [0.01, 0.1]},
+                        {
+                            'n_estimators': [50, 100],
+                            'learning_rate': [0.01, 0.1]
+                        },
                         cv=5
                     ).fit(X_train, y_train)
                 },
-                'metrics': {
-                    'cv_r2': np.mean(cross_val_score(
-                        GradientBoostingRegressor(random_state=42),
-                        X, y, cv=5, scoring='r2'
-                    ))
-                }
+                'metrics': {}
             }
             
-            # Calculate validation metrics
+            # Calculate metrics
             for name, model in models[target]['models'].items():
                 pred = model.predict(X_val)
                 models[target]['metrics'][f'{name}_r2'] = r2_score(y_val, pred)
                 models[target]['metrics'][f'{name}_mse'] = mean_squared_error(y_val, pred)
+            
+            # Cross-validated R2
+            models[target]['metrics']['cv_r2'] = np.mean(cross_val_score(
+                GradientBoostingRegressor(random_state=42),
+                X, y, cv=5, scoring='r2'
+            ))
                 
         except Exception as e:
             st.error(f"Error modeling {target}: {str(e)}")
@@ -172,7 +179,7 @@ def train_enhanced_models(df):
 # Visualization Functions
 # ----------------------------
 def plot_feature_importance(models, target):
-    rf_model = models[target]['models']['rf'].best_estimator_
+    rf_model = models[target]['models']['random_forest'].best_estimator_
     features = models[target]['features']
     importance = rf_model.feature_importances_
     
@@ -202,25 +209,25 @@ def plot_waste_distribution(df):
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Enhanced Thailand Waste Prediction System")
-    st.markdown("""
-    Advanced waste generation prediction with feature engineering and model tuning
-    """)
+    st.title("🇹🇭 Thailand Solid Waste Prediction Pro")
+    st.markdown("Advanced waste generation prediction with feature engineering and model tuning")
     
     # Load and prepare data
     raw_df = load_and_prepare_data()
     if raw_df is None:
         st.stop()
     
+    # Feature engineering
+    df = enhanced_feature_engineering(raw_df)
+    
     # Train models
-    models = train_enhanced_models(raw_df)
+    models = train_enhanced_models(df)
     
     # Create tabs
     tab1, tab2, tab3 = st.tabs(["📊 Predictions", "📈 Analysis", "🗂️ Data Explorer"])
     
-    # Prediction Tab
     with tab1:
-        st.header("Enhanced Waste Predictions")
+        st.header("Waste Generation Predictions")
         target = st.selectbox("Select Waste Type", options=list(models.keys()))
         
         # Create input sliders
@@ -230,10 +237,10 @@ def main():
             with cols[i % 3]:
                 input_data[feature] = st.slider(
                     feature,
-                    float(raw_df[feature].min()),
-                    float(raw_df[feature].max()),
-                    float(raw_df[feature].median()),
-                    help=f"Range: {raw_df[feature].min():.2f} to {raw_df[feature].max():.2f}"
+                    float(df[feature].min()),
+                    float(df[feature].max()),
+                    float(df[feature].median()),
+                    help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
                 )
         
         if st.button("Predict Waste Generation", type="primary"):
@@ -252,16 +259,16 @@ def main():
             
             with col1:
                 for name, pred in results.items():
-                    st.metric(f"{name.upper()} Prediction", f"{pred:.2f} tons/day")
+                    st.metric(f"{name.replace('_', ' ').title()} Prediction", 
+                             f"{pred:.2f} tons/day")
             
             with col2:
                 st.write("#### Model Performance")
                 st.write(f"- Cross-Validated R²: {models[target]['metrics']['cv_r2']:.3f}")
                 st.write("Validation R² Scores:")
                 for name in models[target]['models'].keys():
-                    st.write(f"- {name}: {models[target]['metrics'][f'{name}_r2']:.3f}")
+                    st.write(f"- {name.replace('_', ' ').title()}: {models[target]['metrics'][f'{name}_r2']:.3f}")
     
-    # Analysis Tab
     with tab2:
         st.header("Model Analysis")
         target = st.selectbox("Select Waste Type for Analysis", options=list(models.keys()), key='analysis')
@@ -272,7 +279,7 @@ def main():
         
         st.write("### Validation Metrics")
         for name in models[target]['models'].keys():
-            st.write(f"**{name.upper()}**")
+            st.write(f"**{name.replace('_', ' ').title()}**")
             col1, col2 = st.columns(2)
             col1.metric("R² Score", f"{models[target]['metrics'][f'{name}_r2']:.3f}")
             col2.metric("MSE", f"{models[target]['metrics'][f'{name}_mse']:.3f}")
@@ -280,15 +287,14 @@ def main():
         st.subheader("Feature Importance")
         plot_feature_importance(models, target)
     
-    # Data Explorer Tab
     with tab3:
         st.header("Data Exploration")
         
         st.subheader("Waste Distribution")
-        plot_waste_distribution(raw_df)
+        plot_waste_distribution(df)
         
         st.subheader("Correlation Matrix")
-        corr = raw_df.corr(numeric_only=True)
+        corr = df.corr(numeric_only=True)
         fig = px.imshow(
             corr,
             text_auto=True,
@@ -299,7 +305,7 @@ def main():
         st.plotly_chart(fig, use_container_width=True)
         
         st.subheader("Raw Data Preview")
-        st.dataframe(raw_df.head())
+        st.dataframe(df.head())
 
 if __name__ == "__main__":
     main()
