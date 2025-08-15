@@ -61,32 +61,40 @@ def enhanced_feature_engineering(df):
     
     # Economic features
     economic_features = ['GPP_Industrial(%)', 'GPP_Services(%)', 'GPP_Agriculture(%)']
-    df['Economic_Activity'] = df[economic_features].mean(axis=1)
-    df['Industry_Service_Ratio'] = df['GPP_Industrial(%)'] / (df['GPP_Services(%)'] + 1e-6)
+    if all(col in df.columns for col in economic_features):
+        df['Economic_Activity'] = df[economic_features].mean(axis=1)
+        df['Industry_Service_Ratio'] = df['GPP_Industrial(%)'] / (df['GPP_Services(%)'] + 1e-6)
     
     # Tourism features
-    if 'Area' in df.columns:
-        df['Tourism_Pressure'] = df['Visitors(ppl)'] / (df['Area'] + 1)
-    else:
-        df['Tourism_Pressure'] = df['Visitors(ppl)']
+    if 'Visitors(ppl)' in df.columns:
+        if 'Area' in df.columns:
+            df['Tourism_Pressure'] = df['Visitors(ppl)'] / (df['Area'] + 1)
+        else:
+            df['Tourism_Pressure'] = df['Visitors(ppl)']
     
     # Demographic features
-    df['Dependent_Ratio'] = df['Age_0_5'] / df['Pop']
+    if 'Age_0_5' in df.columns and 'Pop' in df.columns:
+        df['Dependent_Ratio'] = df['Age_0_5'] / df['Pop']
     
     # Log transforms
     for col in ['Pop', 'Visitors(ppl)', 'MSW_GenRate(ton/d)']:
         if col in df.columns:
             df[f'log_{col}'] = np.log1p(df[col])
     
-    # Remove zero-variance features
-    selector = VarianceThreshold(threshold=0.01)
+    # Handle missing values for features
     features = [col for col in df.columns if col not in waste_targets]
-    df[features] = selector.fit_transform(df[features])
-    features = df.columns[selector.get_support()]
-    
-    # Handle missing values
     imputer = SimpleImputer(strategy='median')
     df[features] = imputer.fit_transform(df[features])
+    
+    # Variance threshold - fixed implementation
+    selector = VarianceThreshold(threshold=0.01)
+    X = df[features]
+    try:
+        X_selected = selector.fit_transform(X)
+        selected_features = [features[i] for i in selector.get_support(indices=True)]
+        df = df[selected_features + waste_targets]
+    except ValueError as e:
+        st.warning(f"Feature selection failed: {str(e)}. Using all features.")
     
     # Impute targets
     imputer = IterativeImputer(random_state=42, max_iter=10)
@@ -104,20 +112,15 @@ def train_models(df):
     
     for target in waste_targets:
         try:
+            if target not in df.columns:
+                continue
+                
             X = df.drop(columns=waste_targets)
             y = df[target]
             
-            # Target transformation
-            transform_target = st.checkbox(f"Transform {target} (recommended)", value=True, key=f"transform_{target}")
-            if transform_target:
-                qt = QuantileTransformer(output_distribution='normal', random_state=42)
-                y_transformed = qt.fit_transform(y.values.reshape(-1, 1)).flatten()
-            else:
-                y_transformed = y.copy()
-            
             # Train-test split
             X_train, X_test, y_train, y_test = train_test_split(
-                X, y_transformed, test_size=0.2, random_state=42
+                X, y, test_size=0.2, random_state=42
             )
             
             # Model pipelines
@@ -151,18 +154,13 @@ def train_models(df):
             for name, pipeline in pipelines.items():
                 pipeline.fit(X_train, y_train)
                 pred = pipeline.predict(X_test)
-                if transform_target:
-                    pred = qt.inverse_transform(pred.reshape(-1, 1)).flatten()
-                    y_test_actual = qt.inverse_transform(y_test.reshape(-1, 1)).flatten()
-                else:
-                    y_test_actual = y_test
                 
                 results[name] = {
                     'model': pipeline,
-                    'r2': r2_score(y_test_actual, pred),
-                    'mse': mean_squared_error(y_test_actual, pred),
+                    'r2': r2_score(y_test, pred),
+                    'mse': mean_squared_error(y_test, pred),
                     'cv_r2': np.mean(cross_val_score(
-                        pipeline, X, y_transformed, cv=5, scoring='r2'
+                        pipeline, X, y, cv=5, scoring='r2'
                     ))
                 }
             
@@ -175,18 +173,9 @@ def train_models(df):
                     'test_mse': best_model[1]['mse'],
                     'cv_r2': best_model[1]['cv_r2']
                 },
-                'features': X.columns.tolist(),
-                'transform': transform_target
+                'features': X.columns.tolist()
             }
             
-            # Plot diagnostics
-            with st.expander(f"Diagnostics for {target}", expanded=False):
-                plot_actual_vs_predicted(
-                    y_test_actual, pred, 
-                    f"Actual vs Predicted {target}"
-                )
-                plot_error_distribution(y_test_actual, pred)
-                
         except Exception as e:
             st.error(f"Error modeling {target}: {str(e)}")
     
@@ -196,11 +185,17 @@ def train_models(df):
 # Visualization Functions
 # ----------------------------
 def plot_feature_importance(model, features, target):
-    if hasattr(model.named_steps.get('randomforestregressor', None), 'feature_importances_'):
-        importance = model.named_steps['randomforestregressor'].feature_importances_
-    elif hasattr(model.named_steps.get('gradientboostingregressor', None), 'feature_importances_'):
-        importance = model.named_steps['gradientboostingregressor'].feature_importances_
+    # Get the underlying estimator from the pipeline
+    estimator = None
+    for step in model.steps:
+        if hasattr(step[1], 'feature_importances_'):
+            estimator = step[1]
+            break
+    
+    if estimator is not None:
+        importance = estimator.feature_importances_
     else:
+        # For linear models, use coefficients
         importance = np.abs(model.named_steps['ridge'].coef_)
     
     fig = px.bar(
@@ -224,12 +219,6 @@ def plot_actual_vs_predicted(y_true, y_pred, title):
     fig.add_shape(type="line", x0=min(y_true), y0=min(y_true),
                  x1=max(y_true), y1=max(y_true),
                  line=dict(dash="dash"))
-    st.plotly_chart(fig, use_container_width=True)
-
-def plot_error_distribution(y_true, y_pred):
-    errors = y_true - y_pred
-    fig = px.histogram(x=errors, nbins=30, title="Error Distribution")
-    fig.add_vline(x=0, line_dash="dash")
     st.plotly_chart(fig, use_container_width=True)
 
 def plot_waste_distribution(df):
@@ -282,13 +271,7 @@ def main():
         
         if st.button("Predict Waste Generation", type="primary"):
             X_input = pd.DataFrame([input_data])
-            pred = models[target]['model'].predict(X_input)
-            
-            if models[target]['transform']:
-                # Create dummy qt for inverse transform
-                qt = QuantileTransformer(output_distribution='normal', random_state=42)
-                qt.fit(df[target].values.reshape(-1, 1))
-                pred = qt.inverse_transform(pred.reshape(-1, 1)).flatten()[0]
+            pred = models[target]['model'].predict(X_input)[0]
             
             st.success(f"### Predicted {target.replace('_', ' ')}: {pred:.2f} tons/day")
             st.write(f"Model R² score: {models[target]['metrics']['test_r2']:.3f}")
