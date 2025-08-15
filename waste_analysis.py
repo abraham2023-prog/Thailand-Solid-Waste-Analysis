@@ -80,7 +80,7 @@ def load_and_prepare_data():
         
         # Remove highly correlated features
         corr_matrix = df[features].corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
         to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
         if to_drop:
             st.warning(f"🚀 Dropping highly correlated features: {to_drop}")
