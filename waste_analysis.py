@@ -6,7 +6,7 @@ import plotly.express as px
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, VotingRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
-from sklearn.feature_selection import RFECV  # This is the correct import location
+from sklearn.feature_selection import RFECV  # Correct import location
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
