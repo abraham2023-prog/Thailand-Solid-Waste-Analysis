@@ -12,7 +12,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.pipeline import make_pipeline
-from statsmodels.stats.outliers_influence import variance_inflation_factor
 import os
 
 # ----------------------------
@@ -60,7 +59,7 @@ def load_and_prepare_data():
         return None
 
 # ----------------------------
-# Feature Engineering with Multicollinearity Handling
+# Feature Engineering with Correlation-Based Multicollinearity Handling
 # ----------------------------
 def enhanced_feature_engineering(df):
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
@@ -72,20 +71,18 @@ def enhanced_feature_engineering(df):
     if all(col in df.columns for col in ['GPP_Agriculture(%)', 'GPP_Industrial(%)', 'GPP_Services(%)']):
         df['Economic_Balance'] = (df['GPP_Industrial(%)'] + 1e-6) / (df['GPP_Services(%)'] + 1e-6)
     
-    # Handle multicollinearity
+    # Handle multicollinearity using correlation analysis
     features = [col for col in df.columns if col not in waste_targets]
-    X = df[features]
+    corr_matrix = df[features].corr().abs()
     
-    # Calculate VIF
-    vif_data = pd.DataFrame()
-    vif_data["feature"] = X.columns
-    vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(len(X.columns))]
+    # Select upper triangle of correlation matrix
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
     
-    # Remove high VIF features
-    high_vif = vif_data[vif_data["VIF"] > 5]["feature"].tolist()
-    if len(high_vif) > 0:
-        st.warning(f"Removing high-VIF features: {high_vif}")
-        features = [f for f in features if f not in high_vif]
+    # Find features with correlation greater than 0.8
+    to_drop = [column for column in upper.columns if any(upper[column] > 0.8)]
+    if len(to_drop) > 0:
+        st.warning(f"Removing highly correlated features: {to_drop}")
+        features = [f for f in features if f not in to_drop]
     
     # Handle missing values
     imputer = SimpleImputer(strategy='median')
@@ -193,7 +190,7 @@ def plot_waste_distribution(df):
 # ----------------------------
 def main():
     st.title("🇹🇭 Thailand Waste Prediction System Pro")
-    st.markdown("Optimized waste generation prediction with multicollinearity handling")
+    st.markdown("Optimized waste generation prediction with correlation-based feature selection")
     
     # Load data
     raw_df = load_and_prepare_data()
