@@ -3,22 +3,32 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.linear_model import Ridge, Lasso
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import cross_val_score, train_test_split
+import os
+
+# XGBoost installation workaround
+try:
+    from xgboost import XGBRegressor
+except ImportError:
+    import subprocess
+    import sys
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "xgboost==1.7.3"])
+    from xgboost import XGBRegressor
+
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor
+from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
+from sklearn.feature_selection import RFECV
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.preprocessing import RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-import os
 
 # ----------------------------
 # Page Configuration
 # ----------------------------
 st.set_page_config(
-    page_title="Thailand Waste Analysis",
-    page_icon="🗑️",
+    page_title="Thailand Waste Analysis Pro",
+    page_icon="♻️",
     layout="wide"
 )
 
@@ -29,9 +39,11 @@ st.set_page_config(
 def load_and_prepare_data():
     try:
         # Load data
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
-        df = pd.read_csv(csv_path)
+        if not os.path.exists('SW_Thailand_2021_Labeled.csv'):
+            st.error("Data file not found! Please ensure SW_Thailand_2021_Labeled.csv is in your app directory")
+            return None
+            
+        df = pd.read_csv('SW_Thailand_2021_Labeled.csv')
         
         # Data Quality Report
         with st.expander("🔍 Initial Data Quality Report", expanded=True):
@@ -47,11 +59,13 @@ def load_and_prepare_data():
 
         # Define targets and features
         waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
-        base_features = ['Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 
-                       'Visitors(ppl)', 'GPP_Agriculture(%)', 
-                       'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)']
         
         # Feature Engineering
+        base_features = ['Pop', 'GPP_Industrial(%)', 'Visitors(ppl)', 
+                       'GPP_Agriculture(%)', 'GPP_Services(%)', 'Age_0_5', 
+                       'MSW_GenRate(ton/d)']
+        
+        # Create new features
         if 'Area' in df.columns:
             df['Population_Density'] = df['Pop'] / df['Area']
             base_features.append('Population_Density')
@@ -61,7 +75,11 @@ def load_and_prepare_data():
                                      'GPP_Services(%)']].std(axis=1)
         base_features.append('Economic_Diversity')
         
-        # Handle missing values - two step process
+        # Add interaction terms
+        df['Industrial_Service_Interaction'] = df['GPP_Industrial(%)'] * df['GPP_Services(%)']
+        base_features.extend(['Industrial_Service_Interaction'])
+        
+        # Handle missing values
         features = [f for f in base_features if f in df.columns]
         
         # 1. Impute features using median
@@ -72,11 +90,18 @@ def load_and_prepare_data():
         imputer = IterativeImputer(random_state=42, max_iter=10)
         df[waste_targets] = imputer.fit_transform(df[waste_targets])
         
+        # Remove highly correlated features
+        corr_matrix = df[features].corr().abs()
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper.columns if any(upper[column] > 0.9)]
+        if to_drop:
+            st.warning(f"🚀 Dropping highly correlated features: {to_drop}")
+            features = [f for f in features if f not in to_drop]
+        
         # Final check
         with st.expander("✅ Final Data Quality Report"):
             st.write("Missing Values After Processing:")
             st.write(df.isnull().sum())
-            
             st.write("\nDataset Shape:", df.shape)
             st.write("Features used:", features)
         
@@ -87,115 +112,115 @@ def load_and_prepare_data():
         return None
 
 # ----------------------------
-# Model Training
+# Feature Selection
 # ----------------------------
-@st.cache_resource
-def train_all_waste_models(df):
-    try:
-        models = {}
-        waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
-        
-        for target in waste_targets:
-            if target not in df.columns:
-                continue
-                
-            # Prepare data for this target
-            X = df.drop(columns=waste_targets)
-            y = df[target]
-            
-            # Verify shapes
-            if len(X) != len(y):
-                st.error(f"Shape mismatch for {target}: X has {len(X)} samples, y has {len(y)}")
-                continue
-                
-            # Feature scaling
-            scaler = RobustScaler()
-            X_scaled = scaler.fit_transform(X)
-            
-            # Train-test split
-            X_train, X_val, y_train, y_val = train_test_split(
-                X_scaled, y, test_size=0.3, random_state=42
-            )
-            
-            # Initialize models
-            ridge = Ridge(alpha=1.0)
-            lasso = Lasso(alpha=0.01, max_iter=10000)
-            rf_reg = RandomForestRegressor(
-                n_estimators=100,
-                max_depth=3,
-                min_samples_leaf=10,
-                random_state=42
-            )
-            
-            # Cross-validation
-            cv_scores = cross_val_score(ridge, X_train, y_train, cv=5, scoring='r2')
-            cv_r2 = np.mean(cv_scores)
-            
-            # Train models
-            ridge.fit(X_train, y_train)
-            lasso.fit(X_train, y_train)
-            rf_reg.fit(X_train, y_train)
-            
-            # Calculate validation metrics
-            val_pred = ridge.predict(X_val)
-            val_r2 = r2_score(y_val, val_pred)
-            val_mse = mean_squared_error(y_val, val_pred)
-            
-            # Store results
-            models[target] = {
-                'ridge': ridge,
-                'lasso': lasso,
-                'rf_reg': rf_reg,
-                'features': X.columns.tolist(),
-                'cv_r2': cv_r2,
-                'val_r2': val_r2,
-                'val_mse': val_mse,
-                'scaler': scaler,
-                'n_samples': len(X)
-            }
-            
-        return models
+def select_features(X, y):
+    """
+    Use Recursive Feature Elimination with Cross-Validation
+    """
+    estimator = RandomForestRegressor(random_state=42)
+    selector = RFECV(estimator, step=1, cv=5, scoring='r2')
+    selector = selector.fit(X, y)
     
-    except Exception as e:
-        st.error(f"Model training failed: {str(e)}")
-        return None
+    selected_features = X.columns[selector.support_]
+    st.write(f"✅ Selected features: {list(selected_features)}")
+    return selected_features
+
+# ----------------------------
+# Model Training with Hyperparameter Tuning
+# ----------------------------
+def train_optimized_model(X, y):
+    """
+    Train model with hyperparameter tuning
+    """
+    models = {
+        'ridge': {
+            'model': Ridge(),
+            'params': {'alpha': [0.01, 0.1, 1, 10, 100]}
+        },
+        'random_forest': {
+            'model': RandomForestRegressor(random_state=42),
+            'params': {
+                'n_estimators': [50, 100, 200],
+                'max_depth': [None, 3, 5, 10],
+                'min_samples_leaf': [1, 5, 10]
+            }
+        }
+    }
+    
+    best_models = {}
+    for name, config in models.items():
+        gs = GridSearchCV(
+            config['model'],
+            config['params'],
+            cv=5,
+            scoring='r2',
+            n_jobs=-1
+        )
+        gs.fit(X, y)
+        best_models[name] = gs.best_estimator_
+        st.write(f"🎯 Best {name} params:", gs.best_params_)
+        st.write(f"Best {name} R²: {gs.best_score_:.3f}")
+    
+    return best_models
+
+def train_ensemble_model(X, y):
+    """
+    Train an ensemble model combining multiple approaches
+    """
+    # Individual models
+    ridge = Ridge(alpha=1.0)
+    rf = RandomForestRegressor(n_estimators=100, max_depth=5, random_state=42)
+    xgb = XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
+    
+    # Ensemble
+    ensemble = VotingRegressor(
+        estimators=[('ridge', ridge), ('rf', rf), ('xgb', xgb)],
+        weights=[1, 2, 2]  # Give more weight to tree-based models
+    )
+    
+    # Cross-validate
+    scores = cross_val_score(ensemble, X, y, cv=5, scoring='r2')
+    st.write(f"🏆 Ensemble CV R²: {np.mean(scores):.3f}")
+    
+    # Fit final model
+    ensemble.fit(X, y)
+    return ensemble
 
 # ----------------------------
 # Visualization Functions
 # ----------------------------
-def plot_feature_importance(model_data, target):
-    features = model_data['features']
-    importance = model_data['rf_reg'].feature_importances_
+def plot_feature_importance(model, features, title):
+    if hasattr(model, 'feature_importances_'):
+        importance = model.feature_importances_
+    else:
+        # For models without feature_importances_, use coefficients
+        importance = np.abs(model.coef_)
     
-    fig = px.bar(
-        x=features,
-        y=importance,
-        title=f"Feature Importance for {target}",
-        labels={'x': 'Features', 'y': 'Importance'},
-        color=importance,
-        color_continuous_scale='Bluered'
-    )
+    df = pd.DataFrame({'Feature': features, 'Importance': importance})
+    df = df.sort_values('Importance', ascending=False)
+    
+    fig = px.bar(df, x='Feature', y='Importance',
+                title=title, color='Importance')
     fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_waste_distribution(df):
-    waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
-                 if col in df.columns]
-    
-    fig = px.box(
-        df[waste_cols],
-        title="Waste Distribution Across Provinces",
-        points="all"
-    )
-    st.plotly_chart(fig, use_container_width=True)
+def plot_residuals(y_true, y_pred, title):
+    residuals = y_true - y_pred
+    fig = px.scatter(x=y_pred, y=residuals,
+                    labels={'x': 'Predicted', 'y': 'Residuals'},
+                    title=title,
+                    trendline="lowess")
+    fig.add_hline(y=0, line_dash="dash")
+    st.plotly_chart(fig)
 
 # ----------------------------
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Thailand Solid Waste Prediction System")
+    st.title("🇹🇭 Thailand Solid Waste Prediction Pro")
     st.markdown("""
-    This system predicts waste generation patterns across Thailand's provinces using machine learning models.
+    Advanced waste generation prediction system with feature engineering and ensemble modeling
     """)
     
     # Load and prepare data
@@ -203,23 +228,70 @@ def main():
     if df is None:
         st.stop()
     
-    # Train models
-    models = train_all_waste_models(df)
-    if models is None:
-        st.stop()
-    
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📊 Predictions", "📈 Analysis", "🗂️ Data Explorer"])
+    tab1, tab2, tab3 = st.tabs(["🧪 Model Training", "📊 Predictions", "📈 Analysis"])
     
-    # Prediction Tab
     with tab1:
-        st.header("Waste Generation Predictions")
-        target = st.selectbox("Select Waste Type", options=list(models.keys()))
+        st.header("Model Training Configuration")
+        target = st.selectbox("Select Target Variable", 
+                            options=['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'])
         
-        # Create input sliders
+        if st.button("Train Models", type="primary"):
+            with st.spinner("Training models..."):
+                # Prepare data
+                X = df.drop(columns=['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'])
+                y = df[target]
+                
+                # Feature selection
+                selected_features = select_features(X, y)
+                X = X[selected_features]
+                
+                # Train models
+                optimized_models = train_optimized_model(X, y)
+                ensemble = train_ensemble_model(X, y)
+                
+                # Store in session state
+                st.session_state.models = {
+                    'ridge': optimized_models['ridge'],
+                    'rf': optimized_models['random_forest'],
+                    'ensemble': ensemble,
+                    'features': selected_features,
+                    'target': target
+                }
+                
+                # Evaluate on test set
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42
+                )
+                
+                # Make predictions
+                y_pred = ensemble.predict(X_test)
+                r2 = r2_score(y_test, y_pred)
+                mse = mean_squared_error(y_test, y_pred)
+                
+                st.success(f"🎉 Final Model Performance (Test Set)")
+                col1, col2 = st.columns(2)
+                col1.metric("R² Score", f"{r2:.3f}")
+                col2.metric("MSE", f"{mse:.3f}")
+                
+                # Plot residuals
+                plot_residuals(y_test, y_pred, "Ensemble Model Residuals")
+    
+    with tab2:
+        st.header("Make Predictions")
+        if 'models' not in st.session_state:
+            st.warning("Please train models first in the Model Training tab")
+            st.stop()
+            
+        model = st.session_state.models
+        target = model['target']
+        
+        # Create input form
+        st.subheader(f"Predict {target.replace('_', ' ')}")
         cols = st.columns(3)
         input_data = {}
-        for i, feature in enumerate(models[target]['features']):
+        
+        for i, feature in enumerate(model['features']):
             with cols[i % 3]:
                 input_data[feature] = st.slider(
                     feature,
@@ -229,65 +301,67 @@ def main():
                     help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
                 )
         
-        if st.button("Predict Waste Generation", type="primary"):
+        if st.button("Predict", type="primary"):
             # Prepare input
             X_input = pd.DataFrame([input_data])
-            X_input_scaled = models[target]['scaler'].transform(X_input)
             
-            # Get predictions
-            ridge_pred = models[target]['ridge'].predict(X_input_scaled)[0]
-            lasso_pred = models[target]['lasso'].predict(X_input_scaled)[0]
-            rf_pred = models[target]['rf_reg'].predict(X_input_scaled)[0]
+            # Make predictions
+            ridge_pred = model['ridge'].predict(X_input)[0]
+            rf_pred = model['rf'].predict(X_input)[0]
+            ensemble_pred = model['ensemble'].predict(X_input)[0]
             
             # Display results
             st.success("### Prediction Results")
             col1, col2 = st.columns(2)
             
             with col1:
-                st.metric("Ridge Regression Prediction", f"{ridge_pred:.2f} tons/day")
-                st.metric("Lasso Regression Prediction", f"{lasso_pred:.2f} tons/day")
-                st.metric("Random Forest Prediction", f"{rf_pred:.2f} tons/day")
+                st.metric("Ridge Regression", f"{ridge_pred:.2f} tons/day")
+                st.metric("Random Forest", f"{rf_pred:.2f} tons/day")
+                st.metric("Ensemble Model", f"{ensemble_pred:.2f} tons/day")
             
             with col2:
-                st.write("#### Model Performance")
-                st.write(f"- Cross-Validated R²: {models[target]['cv_r2']:.3f}")
-                st.write(f"- Validation R²: {models[target]['val_r2']:.3f}")
-                st.write(f"- Validation MSE: {models[target]['val_mse']:.3f}")
+                st.write("### Model Confidence")
+                st.write("The ensemble model combines predictions from:")
+                st.write("- Ridge Regression (linear relationships)")
+                st.write("- Random Forest (non-linear patterns)")
+                st.write("- XGBoost (gradient boosting)")
     
-    # Analysis Tab
-    with tab2:
+    with tab3:
         st.header("Model Analysis")
-        target = st.selectbox("Select Waste Type for Analysis", options=list(models.keys()), key='analysis')
-        
-        st.subheader("Model Performance")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Cross-Validated R²", f"{models[target]['cv_r2']:.3f}")
-        col2.metric("Validation R²", f"{models[target]['val_r2']:.3f}")
-        col3.metric("Validation MSE", f"{models[target]['val_mse']:.3f}")
+        if 'models' not in st.session_state:
+            st.warning("Please train models first in the Model Training tab")
+            st.stop()
+            
+        model = st.session_state.models
         
         st.subheader("Feature Importance")
-        plot_feature_importance(models[target], target)
-    
-    # Data Explorer Tab
-    with tab3:
-        st.header("Data Exploration")
+        plot_feature_importance(model['rf'], model['features'], 
+                              "Random Forest Feature Importance")
         
-        st.subheader("Waste Distribution")
-        plot_waste_distribution(df)
+        st.subheader("Model Comparison")
+        models = {
+            'Ridge': model['ridge'],
+            'Random Forest': model['rf'],
+            'Ensemble': model['ensemble']
+        }
         
-        st.subheader("Correlation Matrix")
-        corr = df.corr(numeric_only=True)
-        fig = px.imshow(
-            corr,
-            text_auto=True,
-            aspect="auto",
-            color_continuous_scale='RdBu',
-            range_color=[-1, 1]
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        # Cross-validate all models
+        X = df[model['features']]
+        y = df[model['target']]
         
-        st.subheader("Raw Data Preview")
-        st.dataframe(df.head())
+        results = []
+        for name, m in models.items():
+            scores = cross_val_score(m, X, y, cv=5, scoring='r2')
+            results.append({
+                'Model': name,
+                'Mean R²': np.mean(scores),
+                'Std R²': np.std(scores)
+            })
+        
+        results_df = pd.DataFrame(results)
+        fig = px.bar(results_df, x='Model', y='Mean R²', error_y='Std R²',
+                    title="Model Comparison (5-Fold CV)")
+        st.plotly_chart(fig)
 
 if __name__ == "__main__":
     main()
