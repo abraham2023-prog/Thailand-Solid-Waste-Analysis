@@ -8,11 +8,10 @@ from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.preprocessing import RobustScaler, QuantileTransformer
+from sklearn.preprocessing import RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.pipeline import make_pipeline
 
 # ----------------------------
@@ -59,51 +58,37 @@ def load_and_prepare_data():
 def enhanced_feature_engineering(df):
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
-    # Economic features
-    economic_features = ['GPP_Industrial(%)', 'GPP_Services(%)', 'GPP_Agriculture(%)']
-    if all(col in df.columns for col in economic_features):
-        df['Economic_Activity'] = df[economic_features].mean(axis=1)
-        df['Industry_Service_Ratio'] = df['GPP_Industrial(%)'] / (df['GPP_Services(%)'] + 1e-6)
+    # Ensure all columns are numeric
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            try:
+                df[col] = pd.to_numeric(df[col])
+            except ValueError:
+                df = df.drop(columns=[col])
+                st.warning(f"Dropped non-numeric column: {col}")
     
-    # Tourism features
-    if 'Visitors(ppl)' in df.columns:
-        if 'Area' in df.columns:
-            df['Tourism_Pressure'] = df['Visitors(ppl)'] / (df['Area'] + 1)
-        else:
-            df['Tourism_Pressure'] = df['Visitors(ppl)']
+    # Basic feature engineering
+    if 'Area' in df.columns and 'Pop' in df.columns:
+        df['Population_Density'] = df['Pop'] / df['Area']
     
-    # Demographic features
-    if 'Age_0_5' in df.columns and 'Pop' in df.columns:
-        df['Dependent_Ratio'] = df['Age_0_5'] / df['Pop']
+    if all(col in df.columns for col in ['GPP_Agriculture(%)', 'GPP_Industrial(%)', 'GPP_Services(%)']):
+        df['Economic_Diversity'] = df[['GPP_Agriculture(%)', 'GPP_Industrial(%)', 'GPP_Services(%)']].std(axis=1)
     
-    # Log transforms
-    for col in ['Pop', 'Visitors(ppl)', 'MSW_GenRate(ton/d)']:
-        if col in df.columns:
-            df[f'log_{col}'] = np.log1p(df[col])
-    
-    # Handle missing values for features
+    # Handle missing values - two step process
     features = [col for col in df.columns if col not in waste_targets]
+    
+    # 1. Impute features using median
     imputer = SimpleImputer(strategy='median')
     df[features] = imputer.fit_transform(df[features])
     
-    # Variance threshold - fixed implementation
-    selector = VarianceThreshold(threshold=0.01)
-    X = df[features]
-    try:
-        X_selected = selector.fit_transform(X)
-        selected_features = [features[i] for i in selector.get_support(indices=True)]
-        df = df[selected_features + waste_targets]
-    except ValueError as e:
-        st.warning(f"Feature selection failed: {str(e)}. Using all features.")
-    
-    # Impute targets
+    # 2. For waste targets - use iterative imputation
     imputer = IterativeImputer(random_state=42, max_iter=10)
     df[waste_targets] = imputer.fit_transform(df[waste_targets])
     
     return df
 
 # ----------------------------
-# Model Training with Diagnostics
+# Model Training
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -111,12 +96,15 @@ def train_models(df):
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
     for target in waste_targets:
+        if target not in df.columns:
+            continue
+            
         try:
-            if target not in df.columns:
-                continue
-                
             X = df.drop(columns=waste_targets)
             y = df[target]
+            
+            # Remove any remaining non-numeric columns
+            X = X.select_dtypes(include=[np.number])
             
             # Train-test split
             X_train, X_test, y_train, y_test = train_test_split(
@@ -185,17 +173,12 @@ def train_models(df):
 # Visualization Functions
 # ----------------------------
 def plot_feature_importance(model, features, target):
-    # Get the underlying estimator from the pipeline
-    estimator = None
-    for step in model.steps:
-        if hasattr(step[1], 'feature_importances_'):
-            estimator = step[1]
-            break
-    
-    if estimator is not None:
-        importance = estimator.feature_importances_
+    # Get feature importances based on model type
+    if hasattr(model.named_steps.get('randomforestregressor', None), 'feature_importances_'):
+        importance = model.named_steps['randomforestregressor'].feature_importances_
+    elif hasattr(model.named_steps.get('gradientboostingregressor', None), 'feature_importances_'):
+        importance = model.named_steps['gradientboostingregressor'].feature_importances_
     else:
-        # For linear models, use coefficients
         importance = np.abs(model.named_steps['ridge'].coef_)
     
     fig = px.bar(
@@ -209,18 +192,6 @@ def plot_feature_importance(model, features, target):
     fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_actual_vs_predicted(y_true, y_pred, title):
-    fig = px.scatter(
-        x=y_true, y=y_pred,
-        labels={'x': 'Actual', 'y': 'Predicted'},
-        title=title,
-        trendline="ols"
-    )
-    fig.add_shape(type="line", x0=min(y_true), y0=min(y_true),
-                 x1=max(y_true), y1=max(y_true),
-                 line=dict(dash="dash"))
-    st.plotly_chart(fig, use_container_width=True)
-
 def plot_waste_distribution(df):
     waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
                  if col in df.columns]
@@ -231,8 +202,8 @@ def plot_waste_distribution(df):
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Thailand Waste Prediction System Pro")
-    st.markdown("Advanced waste generation prediction with feature engineering and model diagnostics")
+    st.title("🇹🇭 Thailand Waste Prediction System")
+    st.markdown("Predicting waste generation patterns across Thailand's provinces")
     
     # Load data
     raw_df = load_and_prepare_data()
@@ -241,10 +212,6 @@ def main():
     
     # Feature engineering
     df = enhanced_feature_engineering(raw_df)
-    
-    # Show transformed data
-    with st.expander("View Processed Data", expanded=False):
-        st.dataframe(df.describe())
     
     # Train models
     models = train_models(df)
