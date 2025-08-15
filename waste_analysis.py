@@ -3,11 +3,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.linear_model import Ridge, Lasso
+from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor, VotingRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV, RFECV
 from sklearn.metrics import r2_score, mean_squared_error
-from sklearn.preprocessing import RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
@@ -181,22 +180,17 @@ def train_ensemble_model(X, y):
 # Visualization Functions
 # ----------------------------
 def plot_feature_importance(model, features, title):
-    importance = model.feature_importances_
-    std = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0) if hasattr(model, 'estimators_') else None
+    if hasattr(model, 'feature_importances_'):
+        importance = model.feature_importances_
+    else:
+        # For models without feature_importances_, use coefficients
+        importance = np.abs(model.coef_)
     
     df = pd.DataFrame({'Feature': features, 'Importance': importance})
-    if std is not None:
-        df['Std'] = std
-    
     df = df.sort_values('Importance', ascending=False)
     
-    if std is not None:
-        fig = px.bar(df, x='Feature', y='Importance', error_y='Std',
-                    title=title, color='Importance')
-    else:
-        fig = px.bar(df, x='Feature', y='Importance',
-                    title=title, color='Importance')
-    
+    fig = px.bar(df, x='Feature', y='Importance',
+                title=title, color='Importance')
     fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
