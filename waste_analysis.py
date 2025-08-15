@@ -5,15 +5,52 @@ import numpy as np
 import plotly.express as px
 from sklearn.linear_model import Ridge, Lasso
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
+from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV, RFECV
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler, PolynomialFeatures
 from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
-from sklearn.feature_selection import RFECV
 from sklearn.pipeline import make_pipeline
 import os
+
+# ----------------------------
+# Page Configuration
+# ----------------------------
+st.set_page_config(
+    page_title="Enhanced Thailand Waste Analysis",
+    page_icon="🗑️",
+    layout="wide"
+)
+
+# ----------------------------
+# Data Loading and Preparation (Updated)
+# ----------------------------
+@st.cache_data
+def load_and_prepare_data():
+    try:
+        # Load data
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
+        df = pd.read_csv(csv_path)
+        
+        # Data Quality Report
+        with st.expander("🔍 Initial Data Quality Report", expanded=True):
+            st.write("### Missing Values Before Processing")
+            missing_data = df.isnull().sum().to_frame("Missing Values")
+            st.dataframe(missing_data.style.background_gradient(cmap='Reds'))
+            
+            # Remove completely empty columns
+            empty_cols = df.columns[df.isnull().all()]
+            if len(empty_cols) > 0:
+                st.warning(f"Removing empty columns: {list(empty_cols)}")
+                df = df.drop(columns=empty_cols)
+
+        return df
+    
+    except Exception as e:
+        st.error(f"Data loading failed: {str(e)}")
+        return None
 
 # ----------------------------
 # Enhanced Feature Engineering
@@ -48,7 +85,18 @@ def enhanced_feature_engineering(df):
         df[f'log_{col}'] = np.log1p(df[col])
         base_features.append(f'log_{col}')
     
-    return df, base_features, waste_targets
+    # Handle missing values
+    features = [f for f in base_features if f in df.columns]
+    
+    # 1. Impute features using median
+    imputer = SimpleImputer(strategy='median')
+    df[features] = imputer.fit_transform(df[features])
+    
+    # 2. For waste targets - use iterative imputation
+    imputer = IterativeImputer(random_state=42, max_iter=10)
+    df[waste_targets] = imputer.fit_transform(df[waste_targets])
+    
+    return df[features + waste_targets]
 
 # ----------------------------
 # Improved Model Training
@@ -56,11 +104,12 @@ def enhanced_feature_engineering(df):
 @st.cache_resource
 def train_enhanced_models(df):
     models = {}
-    df, base_features, waste_targets = enhanced_feature_engineering(df)
+    df = enhanced_feature_engineering(df)
+    waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
     for target in waste_targets:
         try:
-            X = df[base_features]
+            X = df.drop(columns=waste_targets)
             y = df[target]
             
             # Feature selection
@@ -78,7 +127,7 @@ def train_enhanced_models(df):
             # Model pipelines with hyperparameter tuning
             models[target] = {
                 'features': selected_features.tolist(),
-                'scaler': RobustScaler(),
+                'scaler': RobustScaler().fit(X_train),
                 'models': {
                     'ridge': GridSearchCV(
                         Ridge(),
@@ -120,9 +169,9 @@ def train_enhanced_models(df):
     return models
 
 # ----------------------------
-# Enhanced Visualization
+# Visualization Functions
 # ----------------------------
-def plot_enhanced_feature_importance(models, target):
+def plot_feature_importance(models, target):
     rf_model = models[target]['models']['rf'].best_estimator_
     features = models[target]['features']
     importance = rf_model.feature_importances_
@@ -138,59 +187,119 @@ def plot_enhanced_feature_importance(models, target):
     fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
+def plot_waste_distribution(df):
+    waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
+                 if col in df.columns]
+    
+    fig = px.box(
+        df[waste_cols],
+        title="Waste Distribution Across Provinces",
+        points="all"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
 # ----------------------------
-# Main Application (Updated)
+# Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Enhanced Thailand Waste Prediction")
+    st.title("🇹🇭 Enhanced Thailand Waste Prediction System")
+    st.markdown("""
+    Advanced waste generation prediction with feature engineering and model tuning
+    """)
     
-    # Load data
-    df = load_and_prepare_data()  # Keep your existing loading function
-    if df is None:
+    # Load and prepare data
+    raw_df = load_and_prepare_data()
+    if raw_df is None:
         st.stop()
     
-    # Train enhanced models
-    models = train_enhanced_models(df)
+    # Train models
+    models = train_enhanced_models(raw_df)
     
-    # Prediction Interface
-    st.header("Enhanced Predictions")
-    target = st.selectbox("Select Waste Type", options=list(models.keys()))
+    # Create tabs
+    tab1, tab2, tab3 = st.tabs(["📊 Predictions", "📈 Analysis", "🗂️ Data Explorer"])
     
-    # Dynamic input sliders
-    cols = st.columns(3)
-    input_data = {}
-    for i, feature in enumerate(models[target]['features']):
-        with cols[i % 3]:
-            input_data[feature] = st.slider(
-                feature,
-                float(df[feature].min()),
-                float(df[feature].max()),
-                float(df[feature].median()),
-                help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
-            )
-    
-    if st.button("Predict", type="primary"):
-        X_input = pd.DataFrame([input_data])
-        results = {}
+    # Prediction Tab
+    with tab1:
+        st.header("Enhanced Waste Predictions")
+        target = st.selectbox("Select Waste Type", options=list(models.keys()))
         
-        for name, model in models[target]['models'].items():
-            results[name] = model.predict(X_input)[0]
+        # Create input sliders
+        cols = st.columns(3)
+        input_data = {}
+        for i, feature in enumerate(models[target]['features']):
+            with cols[i % 3]:
+                input_data[feature] = st.slider(
+                    feature,
+                    float(raw_df[feature].min()),
+                    float(raw_df[feature].max()),
+                    float(raw_df[feature].median()),
+                    help=f"Range: {raw_df[feature].min():.2f} to {raw_df[feature].max():.2f}"
+                )
         
-        # Display results
-        st.success("## Prediction Results")
+        if st.button("Predict Waste Generation", type="primary"):
+            # Prepare input
+            X_input = pd.DataFrame([input_data])
+            X_input_scaled = models[target]['scaler'].transform(X_input)
+            
+            # Get predictions
+            results = {}
+            for name, model in models[target]['models'].items():
+                results[name] = model.predict(X_input_scaled)[0]
+            
+            # Display results
+            st.success("### Prediction Results")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                for name, pred in results.items():
+                    st.metric(f"{name.upper()} Prediction", f"{pred:.2f} tons/day")
+            
+            with col2:
+                st.write("#### Model Performance")
+                st.write(f"- Cross-Validated R²: {models[target]['metrics']['cv_r2']:.3f}")
+                st.write("Validation R² Scores:")
+                for name in models[target]['models'].keys():
+                    st.write(f"- {name}: {models[target]['metrics'][f'{name}_r2']:.3f}")
+    
+    # Analysis Tab
+    with tab2:
+        st.header("Model Analysis")
+        target = st.selectbox("Select Waste Type for Analysis", options=list(models.keys()), key='analysis')
+        
+        st.subheader("Model Performance")
         col1, col2 = st.columns(2)
+        col1.metric("Cross-Validated R²", f"{models[target]['metrics']['cv_r2']:.3f}")
         
-        with col1:
-            for name, pred in results.items():
-                st.metric(f"{name.upper()} Prediction", f"{pred:.2f} tons/day")
+        st.write("### Validation Metrics")
+        for name in models[target]['models'].keys():
+            st.write(f"**{name.upper()}**")
+            col1, col2 = st.columns(2)
+            col1.metric("R² Score", f"{models[target]['metrics'][f'{name}_r2']:.3f}")
+            col2.metric("MSE", f"{models[target]['metrics'][f'{name}_mse']:.3f}")
         
-        with col2:
-            st.write("### Model Performance")
-            st.metric("Cross-Validated R²", 
-                     f"{models[target]['metrics']['cv_r2']:.3f}")
-            st.write("Validation R² Scores:")
-            for name in models[target]['models'].keys():
-                st.write(f"- {name}: {models[target]['metrics'][f'{name}_r2']:.3f}")
+        st.subheader("Feature Importance")
+        plot_feature_importance(models, target)
+    
+    # Data Explorer Tab
+    with tab3:
+        st.header("Data Exploration")
+        
+        st.subheader("Waste Distribution")
+        plot_waste_distribution(raw_df)
+        
+        st.subheader("Correlation Matrix")
+        corr = raw_df.corr(numeric_only=True)
+        fig = px.imshow(
+            corr,
+            text_auto=True,
+            aspect="auto",
+            color_continuous_scale='RdBu',
+            range_color=[-1, 1]
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.subheader("Raw Data Preview")
+        st.dataframe(raw_df.head())
 
 if __name__ == "__main__":
     main()
