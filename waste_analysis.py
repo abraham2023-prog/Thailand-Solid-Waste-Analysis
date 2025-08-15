@@ -3,9 +3,8 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import os
 from sklearn.linear_model import Ridge
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, KFold
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler
@@ -13,6 +12,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.pipeline import make_pipeline
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+import os
 
 # ----------------------------
 # Page Configuration
@@ -40,6 +41,12 @@ def load_and_prepare_data():
             missing_data = df.isnull().sum().to_frame("Missing Values")
             st.dataframe(missing_data.style.background_gradient(cmap='Reds'))
             
+            # Remove non-numeric columns
+            non_numeric_cols = df.select_dtypes(exclude=['number']).columns
+            if len(non_numeric_cols) > 0:
+                st.warning(f"Removing non-numeric columns: {list(non_numeric_cols)}")
+                df = df.drop(columns=non_numeric_cols)
+            
             # Remove completely empty columns
             empty_cols = df.columns[df.isnull().all()]
             if len(empty_cols) > 0:
@@ -53,28 +60,34 @@ def load_and_prepare_data():
         return None
 
 # ----------------------------
-# Enhanced Feature Engineering
+# Feature Engineering with Multicollinearity Handling
 # ----------------------------
 def enhanced_feature_engineering(df):
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
-    # Convert all columns to numeric
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            try:
-                df[col] = pd.to_numeric(df[col])
-            except ValueError:
-                df = df.drop(columns=[col])
-    
-    # Conservative feature engineering
+    # Basic feature engineering
     if 'Area' in df.columns and 'Pop' in df.columns:
         df['Population_Density'] = df['Pop'] / (df['Area'] + 1e-6)
     
     if all(col in df.columns for col in ['GPP_Agriculture(%)', 'GPP_Industrial(%)', 'GPP_Services(%)']):
         df['Economic_Balance'] = (df['GPP_Industrial(%)'] + 1e-6) / (df['GPP_Services(%)'] + 1e-6)
     
-    # Handle missing values
+    # Handle multicollinearity
     features = [col for col in df.columns if col not in waste_targets]
+    X = df[features]
+    
+    # Calculate VIF
+    vif_data = pd.DataFrame()
+    vif_data["feature"] = X.columns
+    vif_data["VIF"] = [variance_inflation_factor(X.values, i) for i in range(len(X.columns))]
+    
+    # Remove high VIF features
+    high_vif = vif_data[vif_data["VIF"] > 5]["feature"].tolist()
+    if len(high_vif) > 0:
+        st.warning(f"Removing high-VIF features: {high_vif}")
+        features = [f for f in features if f not in high_vif]
+    
+    # Handle missing values
     imputer = SimpleImputer(strategy='median')
     df[features] = imputer.fit_transform(df[features])
     
@@ -82,17 +95,15 @@ def enhanced_feature_engineering(df):
     imputer = IterativeImputer(random_state=42, max_iter=10)
     df[waste_targets] = imputer.fit_transform(df[waste_targets])
     
-    return df
+    return df[features + waste_targets]
 
 # ----------------------------
-# Robust Model Training
+# Model Training
 # ----------------------------
 @st.cache_resource
 def train_models(df):
     models = {}
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
-    
-    # Use consistent cross-validation
     cv = KFold(n_splits=5, shuffle=True, random_state=42)
     
     for target in waste_targets:
@@ -100,7 +111,7 @@ def train_models(df):
             continue
             
         try:
-            X = df.drop(columns=waste_targets).select_dtypes(include=[np.number])
+            X = df.drop(columns=waste_targets)
             y = df[target]
             
             # Train-test split
@@ -108,16 +119,16 @@ def train_models(df):
                 X, y, test_size=0.2, random_state=42
             )
             
-            # More conservative models
+            # Model pipelines
             pipelines = {
                 'Ridge': make_pipeline(
                     RobustScaler(),
-                    Ridge(alpha=10.0)  # Increased regularization
+                    Ridge(alpha=10.0)
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=100,  # Reduced complexity
+                        n_estimators=100,
                         max_depth=3,
                         min_samples_leaf=10,
                         random_state=42
@@ -131,7 +142,6 @@ def train_models(df):
                 pipeline.fit(X_train, y_train)
                 pred = pipeline.predict(X_test)
                 
-                # More reliable CV scoring
                 cv_scores = cross_val_score(
                     pipeline, X, y, cv=cv, scoring='r2'
                 )
@@ -141,10 +151,10 @@ def train_models(df):
                     'test_r2': r2_score(y_test, pred),
                     'test_mse': mean_squared_error(y_test, pred),
                     'cv_r2_mean': np.mean(cv_scores),
-                    'cv_r2_std': np.std(cv_scores)
+                    'cv_r2_std': np.std(cv_scores),
+                    'features': X.columns.tolist()
                 }
             
-            # Store all models for comparison
             models[target] = results
             
         except Exception as e:
@@ -155,24 +165,6 @@ def train_models(df):
 # ----------------------------
 # Visualization Functions
 # ----------------------------
-def plot_model_comparison(models, target):
-    model_names = list(models[target].keys())
-    r2_scores = [models[target][name]['test_r2'] for name in model_names]
-    cv_scores = [models[target][name]['cv_r2_mean'] for name in model_names]
-    
-    fig = px.bar(
-        x=model_names,
-        y=[r2_scores, cv_scores],
-        barmode='group',
-        labels={'x': 'Model', 'value': 'R² Score'},
-        title=f"Model Comparison for {target}",
-        text_auto=True
-    )
-    fig.update_layout(legend_title_text='Metric')
-    fig.data[0].name = 'Test R²'
-    fig.data[1].name = 'CV R²'
-    st.plotly_chart(fig, use_container_width=True)
-
 def plot_feature_importance(model, features, model_name):
     if 'randomforestregressor' in model.named_steps:
         importance = model.named_steps['randomforestregressor'].feature_importances_
@@ -190,12 +182,18 @@ def plot_feature_importance(model, features, model_name):
     fig.update_layout(xaxis_tickangle=-45)
     st.plotly_chart(fig, use_container_width=True)
 
+def plot_waste_distribution(df):
+    waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
+                 if col in df.columns]
+    fig = px.box(df[waste_cols], title="Waste Distribution Across Provinces")
+    st.plotly_chart(fig, use_container_width=True)
+
 # ----------------------------
 # Main Application
 # ----------------------------
 def main():
     st.title("🇹🇭 Thailand Waste Prediction System Pro")
-    st.markdown("Optimized waste generation prediction with reliable performance metrics")
+    st.markdown("Optimized waste generation prediction with multicollinearity handling")
     
     # Load data
     raw_df = load_and_prepare_data()
@@ -204,6 +202,12 @@ def main():
     
     # Feature engineering
     df = enhanced_feature_engineering(raw_df)
+    
+    # Show processed data
+    with st.expander("View Processed Data", expanded=False):
+        st.write("### Missing Values After Processing")
+        st.write(df.isnull().sum())
+        st.write("### Dataset Shape:", df.shape)
     
     # Train models
     models = train_models(df)
@@ -224,7 +228,7 @@ def main():
         # Create input sliders
         cols = st.columns(3)
         input_data = {}
-        features = df.drop(columns=['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']).columns
+        features = models[target][model_choice]['features']
         for i, feature in enumerate(features):
             with cols[i % 3]:
                 input_data[feature] = st.slider(
@@ -249,9 +253,6 @@ def main():
         st.header("Model Analysis")
         target = st.selectbox("Select Waste Type for Analysis", options=list(models.keys()), key='analysis')
         
-        st.subheader("Model Comparison")
-        plot_model_comparison(models, target)
-        
         st.subheader("Feature Importance")
         model_choice = st.selectbox(
             "Select Model for Feature Importance",
@@ -260,15 +261,14 @@ def main():
         )
         plot_feature_importance(
             models[target][model_choice]['model'],
-            df.drop(columns=['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']).columns,
+            models[target][model_choice]['features'],
             model_choice
         )
     
     with tab3:
         st.header("Data Exploration")
         st.subheader("Waste Distribution")
-        fig = px.box(df[['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']])
-        st.plotly_chart(fig, use_container_width=True)
+        plot_waste_distribution(df)
         
         st.subheader("Correlation Matrix")
         corr = df.corr(numeric_only=True)
