@@ -3,29 +3,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor, VotingRegressor
+from sklearn.model_selection import cross_val_score, train_test_split, GridSearchCV
+from sklearn.feature_selection import RFECV  # This is the correct import location
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.impute import SimpleImputer
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+from xgboost import XGBRegressor
 import os
-
-# Try alternative import patterns for sklearn
-try:
-    from sklearn.linear_model import Ridge
-    from sklearn.ensemble import RandomForestRegressor, VotingRegressor
-    from sklearn.model_selection import (cross_val_score, 
-                                       train_test_split, 
-                                       GridSearchCV, 
-                                       RFECV)
-    from sklearn.metrics import r2_score, mean_squared_error
-    from sklearn.impute import SimpleImputer
-    from sklearn.experimental import enable_iterative_imputer
-    from sklearn.impute import IterativeImputer
-except ImportError as e:
-    st.error(f"Scikit-learn import error: {str(e)}")
-    st.stop()
-
-try:
-    from xgboost import XGBRegressor
-except ImportError as e:
-    st.error(f"XGBoost import error: {str(e)}")
-    st.stop()
 
 # ----------------------------
 # Page Configuration
@@ -35,8 +22,6 @@ st.set_page_config(
     page_icon="♻️",
     layout="wide"
 )
-
-# [Rest of your existing code remains exactly the same...]
 
 # ----------------------------
 # Data Loading and Preparation
