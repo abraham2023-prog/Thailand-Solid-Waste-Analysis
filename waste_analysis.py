@@ -2,42 +2,53 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
 from sklearn.linear_model import Ridge, Lasso
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, classification_report
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, MinMaxScaler
 from sklearn.impute import SimpleImputer
 import os
 
-# Build the absolute path to the CSV file
-script_dir = os.path.dirname(os.path.abspath(__file__))
-csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
+# ----------------------------
+# Page Config
+# ----------------------------
+st.set_page_config(
+    page_title="Waste Prediction System",
+    page_icon="🗑️",
+    layout="wide"
+)
 
-# Enhanced data loading with thorough diagnostics and imputation
+# ----------------------------
+# Data Loading & Preparation
+# ----------------------------
 @st.cache_data
 def load_and_prepare_data():
     try:
+        # Build the absolute path to the CSV file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
         df = pd.read_csv(csv_path)
         
         # Data Quality Report
-        with st.expander("Data Quality Report"):
+        with st.expander("🔍 Data Quality Report", expanded=False):
             st.write("### Missing Values Before Imputation")
-            st.write(df.isnull().sum())
+            missing_df = pd.DataFrame(df.isnull().sum(), columns=["Missing Values"])
+            st.dataframe(missing_df.style.background_gradient(cmap='Reds'))
             
             # Check for constant columns
             constant_cols = [col for col in df.columns if df[col].nunique() == 1]
             if constant_cols:
-                st.warning(f"Constant columns detected: {constant_cols}")
+                st.warning(f"Constant columns detected and removed: {constant_cols}")
                 df = df.drop(columns=constant_cols)
         
-        # Critical feature selection
+        # Feature Engineering
         waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
         base_features = ['Pop', 'GPP_per_Capita', 'GPP_Industrial(%)', 
                        'Visitors(ppl)', 'GPP_Agriculture(%)', 
                        'GPP_Services(%)', 'Age_0_5', 'MSW_GenRate(ton/d)']
         
-        # Feature engineering
         if 'Area' in df.columns:
             df['Population_Density'] = df['Pop'] / df['Area']
             base_features.append('Population_Density')
@@ -49,7 +60,7 @@ def load_and_prepare_data():
         
         # Remove highly correlated features
         corr_matrix = df[base_features].corr().abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
         to_drop = [column for column in upper.columns if any(upper[column] > 0.95)]
         if to_drop:
             st.warning(f"Dropping highly correlated features: {to_drop}")
@@ -58,20 +69,20 @@ def load_and_prepare_data():
         # Final feature selection
         features = [f for f in base_features if f in df.columns]
         
-        # Handle missing values - impute features but drop rows with missing targets
+        # Handle missing values
         imputer = SimpleImputer(strategy='median')
         df[features] = imputer.fit_transform(df[features])
-        
-        # Only keep rows where we have at least one waste target
         df = df.dropna(subset=waste_targets, how='all')
         
         return df[features + waste_targets]
     
     except Exception as e:
-        st.error(f"Data loading failed: {str(e)}")
+        st.error(f"❌ Data loading failed: {str(e)}")
         return None
 
-# Robust modeling with data validation
+# ----------------------------
+# Model Training
+# ----------------------------
 @st.cache_resource
 def train_all_waste_models():
     try:
@@ -86,7 +97,7 @@ def train_all_waste_models():
             if target not in df.columns:
                 continue
                 
-            # Prepare features - exclude other waste types to prevent leakage
+            # Prepare features
             other_targets = [wt for wt in waste_targets if wt != target]
             X = df.drop(columns=other_targets)
             y = df[target]
@@ -96,44 +107,18 @@ def train_all_waste_models():
                 st.warning(f"Not enough data for {target}")
                 continue
             
-            # Feature scaling with RobustScaler
+            # Feature scaling
             scaler = RobustScaler()
             X_scaled = scaler.fit_transform(X)
             
-            # Create validation split
+            # Train-test split
             X_train, X_val, y_train, y_val = train_test_split(
                 X_scaled, y, test_size=0.3, random_state=42
             )
             
-            # Ridge Regression with diagnostics
+            # Initialize models
             ridge = Ridge(alpha=1.0)
-            try:
-                # Use KFold instead of LeaveOneOut for more stability
-                cv_scores = cross_val_score(ridge, X_train, y_train, 
-                                         cv=5, scoring='r2')
-                cv_r2 = np.mean(cv_scores)
-            except Exception as e:
-                st.warning(f"Cross-validation failed for {target}: {str(e)}")
-                cv_r2 = np.nan
-            
-            ridge.fit(X_train, y_train)
-            ridge_pred = ridge.predict(X_val)
-            ridge_r2 = r2_score(y_val, ridge_pred)
-            ridge_mse = mean_squared_error(y_val, ridge_pred)
-            
-            # Check for suspiciously perfect fit
-            if ridge_r2 > 0.95:
-                st.warning(f"Suspiciously high R² ({ridge_r2:.3f}) for {target}")
-                # Add noise to break perfect correlation
-                y_val = y_val * (1 + np.random.normal(0, 0.01, len(y_val)))
-                ridge_r2 = r2_score(y_val, ridge_pred)
-                ridge_mse = mean_squared_error(y_val, ridge_pred)
-            
-            # Lasso Regression
             lasso = Lasso(alpha=0.01, max_iter=10000)
-            lasso.fit(X_train, y_train)
-            
-            # Random Forest Regressor with stricter parameters
             rf_reg = RandomForestRegressor(
                 n_estimators=100,
                 max_depth=3,
@@ -141,18 +126,22 @@ def train_all_waste_models():
                 max_features='sqrt',
                 random_state=42
             )
+            
+            # Cross-validation
+            cv_scores = cross_val_score(ridge, X_train, y_train, cv=5, scoring='r2')
+            cv_r2 = np.mean(cv_scores)
+            
+            # Train models
+            ridge.fit(X_train, y_train)
+            lasso.fit(X_train, y_train)
             rf_reg.fit(X_train, y_train)
             
-            # Classification setup - using meaningful threshold
-            threshold = y.quantile(0.75)  # Top 25% as high waste
+            # Classification setup
+            threshold = y.quantile(0.75)
             y_clf = (y > threshold).astype(int)
+            rf_clf = None
             
-            # Skip classification if classes are too imbalanced
-            if y_clf.nunique() < 2 or min(y_clf.value_counts()) < 5:
-                st.warning(f"Skipping classification for {target} due to class imbalance")
-                rf_clf = None
-            else:
-                # Random Forest Classifier
+            if y_clf.nunique() >= 2 and min(y_clf.value_counts()) >= 5:
                 rf_clf = RandomForestClassifier(
                     n_estimators=100,
                     max_depth=3,
@@ -160,69 +149,87 @@ def train_all_waste_models():
                     class_weight='balanced',
                     random_state=42
                 )
-                X_train_clf, X_val_clf, y_train_clf, y_val_clf = train_test_split(
-                    X_scaled, y_clf, test_size=0.3, random_state=42
-                )
-                rf_clf.fit(X_train_clf, y_train_clf)
+                rf_clf.fit(X_train, y_clf)
             
-            # Store all model information
+            # Store models and metrics
             models[target] = {
-                'ridge_regressor': ridge,
-                'lasso_regressor': lasso,
-                'rf_regressor': rf_reg,
-                'rf_classifier': rf_clf,
+                'ridge': ridge,
+                'lasso': lasso,
+                'rf_reg': rf_reg,
+                'rf_clf': rf_clf,
                 'features': X.columns.tolist(),
                 'threshold': threshold,
                 'cv_r2': cv_r2,
-                'val_r2': ridge_r2,
-                'val_mse': ridge_mse,
+                'scaler': scaler,
                 'X_train': X_train,
                 'y_train': y_train,
                 'X_val': X_val,
-                'y_val': y_val,
-                'scaler': scaler,
-                'has_classifier': rf_clf is not None
+                'y_val': y_val
             }
-            
-            if rf_clf is not None:
-                models[target].update({
-                    'X_train_clf': X_train_clf,
-                    'y_train_clf': y_train_clf,
-                    'X_val_clf': X_val_clf,
-                    'y_val_clf': y_val_clf
-                })
             
         return models
     
     except Exception as e:
-        st.error(f"Model training failed: {str(e)}")
+        st.error(f"❌ Model training failed: {str(e)}")
         return None
 
+# ----------------------------
+# Visualization Functions
+# ----------------------------
+def plot_feature_importance(models, target):
+    fig = px.bar(
+        x=models[target]['features'],
+        y=models[target]['rf_reg'].feature_importances_,
+        title=f"Feature Importance for {target}",
+        labels={'x': 'Features', 'y': 'Importance'}
+    )
+    fig.update_layout(xaxis_tickangle=-45)
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_waste_distribution(df):
+    waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
+                 if col in df.columns]
+    
+    fig = px.box(
+        df[waste_cols],
+        title="Waste Distribution Across Provinces"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# ----------------------------
+# Main App
+# ----------------------------
 def main():
-    st.set_page_config(layout="wide")
-    st.title("🇹🇭 Waste Prediction System with Data Validation")
+    st.title("🇹🇭 Thailand Waste Prediction System")
+    st.markdown("""
+    This system predicts waste generation patterns across Thailand's provinces using machine learning models.
+    """)
     
-    models = train_all_waste_models()
-    if models is None:
-        st.stop()
-    
+    # Load data and models
     df = load_and_prepare_data()
-    if df is None:
+    models = train_all_waste_models()
+    
+    if df is None or models is None:
         st.stop()
     
-    tab1, tab2, tab3 = st.tabs(["Predict", "Analyze", "Data Diagnostics"])
+    # Create tabs
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Predict Waste",
+        "📈 Model Analysis",
+        "🗂️ Data Explorer",
+        "ℹ️ About"
+    ])
     
+    # --- Prediction Tab ---
     with tab1:
-        st.header("Make Predictions")
-        
+        st.header("Make Waste Predictions")
         target = st.selectbox("Select Waste Type", options=list(models.keys()))
-        model = models[target]
         
         cols = st.columns(3)
         input_data = {}
         
-        # Dynamically create sliders for each feature
-        for i, feature in enumerate(model['features']):
+        # Dynamic input sliders
+        for i, feature in enumerate(models[target]['features']):
             if feature in df.columns:
                 with cols[i % 3]:
                     input_data[feature] = st.slider(
@@ -233,112 +240,97 @@ def main():
                         help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
                     )
         
-        if st.button("Predict"):
-            # Prepare and scale input
+        if st.button("Predict", type="primary"):
+            # Prepare input
             X_input = pd.DataFrame([input_data])
-            X_input_scaled = model['scaler'].transform(X_input)
+            X_input_scaled = models[target]['scaler'].transform(X_input)
             
-            # Regression predictions
-            ridge_pred = model['ridge_regressor'].predict(X_input_scaled)[0]
-            lasso_pred = model['lasso_regressor'].predict(X_input_scaled)[0]
-            rf_pred = model['rf_regressor'].predict(X_input_scaled)[0]
+            # Get predictions
+            ridge_pred = models[target]['ridge'].predict(X_input_scaled)[0]
+            lasso_pred = models[target]['lasso'].predict(X_input_scaled)[0]
+            rf_pred = models[target]['rf_reg'].predict(X_input_scaled)[0]
             
             # Display results
-            st.success(f"### {target.replace('_', ' ')} Prediction Results")
-            
+            st.success("### Prediction Results")
             col1, col2 = st.columns(2)
+            
             with col1:
-                st.metric("Ridge Regression", f"{ridge_pred:.4f} tons/day")
-                st.metric("Lasso Regression", f"{lasso_pred:.4f} tons/day")
-                st.metric("Random Forest Regression", f"{rf_pred:.4f} tons/day")
-                st.write(f"Classification threshold: {model['threshold']:.4f} tons/day")
+                st.metric("Ridge Regression", f"{ridge_pred:.2f} tons/day")
+                st.metric("Lasso Regression", f"{lasso_pred:.2f} tons/day")
+                st.metric("Random Forest", f"{rf_pred:.2f} tons/day")
                 
             with col2:
-                if model['has_classifier']:
-                    # Classification prediction
-                    clf_pred = model['rf_classifier'].predict(X_input_scaled)[0]
-                    clf_proba = model['rf_classifier'].predict_proba(X_input_scaled)[0]
-                    st.metric("Classification", 
-                             "High Waste" if clf_pred == 1 else "Low Waste",
+                if models[target]['rf_clf'] is not None:
+                    clf_pred = models[target]['rf_clf'].predict(X_input_scaled)[0]
+                    clf_proba = models[target]['rf_clf'].predict_proba(X_input_scaled)[0]
+                    
+                    st.metric("Waste Level", 
+                             "High" if clf_pred == 1 else "Low",
                              f"Confidence: {max(clf_proba)*100:.1f}%")
                     
-                    # Show class distribution
-                    class_dist = pd.DataFrame({
-                        'Count': [sum(model['y_train_clf'] == 0), sum(model['y_train_clf'] == 1)],
-                        'Waste Level': ['Low Waste', 'High Waste']
+                    # Show probability distribution
+                    prob_df = pd.DataFrame({
+                        'Probability': clf_proba,
+                        'Class': ['Low Waste', 'High Waste']
                     })
-                    st.bar_chart(class_dist.set_index('Waste Level'))
-                else:
-                    st.warning("Classification not available for this waste type")
+                    fig = px.bar(prob_df, x='Class', y='Probability', 
+                                title="Classification Confidence")
+                    st.plotly_chart(fig, use_container_width=True)
     
+    # --- Analysis Tab ---
     with tab2:
-        st.header("Model Analysis")
+        st.header("Model Performance Analysis")
+        target = st.selectbox("Select Waste Type", options=list(models.keys()), key='analysis')
         
-        target = st.selectbox("Select Waste Type", options=list(models.keys()), key='analysis_select')
-        model = models[target]
+        st.subheader("Regression Metrics")
+        col1, col2 = st.columns(2)
+        col1.metric("Cross-Validated R²", f"{models[target]['cv_r2']:.3f}")
+        col2.metric("Classification Threshold", f"{models[target]['threshold']:.2f} tons/day")
         
-        # Regression Analysis
-        st.subheader("Regression Performance")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("5-Fold CV R²", f"{model['cv_r2']:.4f}" if not np.isnan(model['cv_r2']) else "N/A")
-        with col2:
-            st.metric("Validation R²", f"{model['val_r2']:.4f}" if not np.isnan(model['val_r2']) else "N/A")
-        with col3:
-            st.metric("Validation MSE", f"{model['val_mse']:.6f}" if not np.isnan(model['val_mse']) else "N/A")
+        st.subheader("Feature Importance")
+        plot_feature_importance(models, target)
         
-        # Feature Importance
-        st.subheader("Feature Analysis")
-        tab_coef, tab_imp = st.tabs(["Coefficients", "Importance"])
-        
-        with tab_coef:
-            if hasattr(model['ridge_regressor'], 'coef_'):
-                coefs = pd.DataFrame({
-                    'Feature': model['features'],
-                    'Ridge': model['ridge_regressor'].coef_,
-                    'Lasso': model['lasso_regressor'].coef_
-                }).sort_values('Ridge', key=abs, ascending=False)
-                
-                st.dataframe(coefs.style.format({
-                    'Ridge': '{:.6f}',
-                    'Lasso': '{:.6f}'
-                }))
-        
-        with tab_imp:
-            if hasattr(model['rf_regressor'], 'feature_importances_'):
-                importances = pd.DataFrame({
-                    'Feature': model['features'],
-                    'Importance': model['rf_regressor'].feature_importances_
-                }).sort_values('Importance', ascending=False)
-                
-                st.bar_chart(importances.set_index('Feature'))
-                st.dataframe(importances.style.format({'Importance': '{:.6f}'}))
-        
-        # Classification Analysis
-        if model['has_classifier']:
-            st.subheader("Classification Performance")
-            y_clf_pred = model['rf_classifier'].predict(model['X_val_clf'])
-            st.write(f"Validation Accuracy: {accuracy_score(model['y_val_clf'], y_clf_pred):.4f}")
-            
-            st.write("#### Classification Report:")
-            st.text(classification_report(model['y_val_clf'], y_clf_pred))
+        if models[target]['rf_clf'] is not None:
+            st.subheader("Classification Report")
+            y_pred = models[target]['rf_clf'].predict(models[target]['X_val'])
+            st.text(classification_report(
+                models[target]['y_val'] > models[target]['threshold'],
+                y_pred
+            ))
     
+    # --- Data Explorer Tab ---
     with tab3:
-        st.header("Data Diagnostics")
+        st.header("Data Exploration")
         
-        st.write("### Target Variables Distribution")
-        waste_cols = [col for col in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
-                     if col in df.columns]
+        st.subheader("Waste Distribution")
+        plot_waste_distribution(df)
         
-        for col in waste_cols:
-            st.write(f"#### {col}")
-            st.bar_chart(df[col])
-            st.write(f"Variance: {df[col].var():.4f}")
-            st.write(f"Missing values: {df[col].isnull().sum()}")
+        st.subheader("Correlation Matrix")
+        corr = df.corr(numeric_only=True)
+        fig = px.imshow(
+            corr,
+            text_auto=True,
+            aspect="auto",
+            color_continuous_scale='RdBu',
+            range_color=[-1, 1]
+        )
+        st.plotly_chart(fig, use_container_width=True)
         
-        st.write("### Correlation Matrix")
-        corr = df[waste_cols].corr()
-        st.dataframe(corr.style.format("{:.2f}"))
+        st.subheader("Raw Data Preview")
+        st.dataframe(df.head())
+    
+    # --- About Tab ---
+    with tab4:
+        st.header("About This Project")
+        st.markdown("""
+        This waste prediction system was developed to help policymakers and environmental agencies:
+        - Predict waste generation patterns
+        - Identify key drivers of different waste types
+        - Optimize waste management strategies
+        
+        **Data Source:** Thailand Provincial Waste Data (2021)
+        **Models Used:** Ridge/Lasso Regression, Random Forest
+        """)
 
 if __name__ == "__main__":
     main()
