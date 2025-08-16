@@ -109,7 +109,7 @@ def enhanced_feature_engineering(df):
     return df[features + waste_targets]
 
 # ----------------------------
-# Model Training (Final Optimization)
+# Model Training (Optimized)
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -125,93 +125,80 @@ def train_models(df):
             X = df.drop(columns=waste_targets)
             y = df[target]
             
-            # Train-test split with stratified sampling if needed
+            # Train-test split
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
             
-            # Final optimized model configurations
+            # Optimized model pipelines
             pipelines = {
-                'Gradient Boosting': make_pipeline(
+                'Ridge': make_pipeline(
                     RobustScaler(),
-                    GradientBoostingRegressor(
-                        n_estimators=250,        # Increased from 200
-                        learning_rate=0.03,      # Lowered from 0.05
-                        max_depth=5,             # Increased from 4
-                        min_samples_leaf=3,      # More granular
-                        min_samples_split=8,     # New parameter
-                        subsample=0.7,           # More randomness
-                        max_features='sqrt',     # Feature subsampling
-                        random_state=42,
-                        validation_fraction=0.1,
-                        n_iter_no_change=10      # More patience
-                    )
+                    Ridge(alpha=0.5, solver='svd')
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=350,        # Increased from 300
+                        n_estimators=300,
                         max_depth=None,
-                        min_samples_leaf=2,      # More granular
-                        min_samples_split=5,     # New parameter
-                        max_features=0.7,       # More feature subsampling
-                        bootstrap=True,
+                        min_samples_leaf=3,
+                        max_features=0.8,
                         random_state=42,
-                        n_jobs=-1,
-                        warm_start=True          # For potential refitting
+                        n_jobs=-1
                     )
+                ),
+                'Gradient Boosting': make_pipeline(
+                    RobustScaler(),
+                    GradientBoostingRegressor(
+                        n_estimators=200,
+                        learning_rate=0.05,
+                        max_depth=4,
+                        min_samples_leaf=5,
+                        subsample=0.8,
+                        random_state=42
+                    )
+                ),
+                'SVR': make_pipeline(
+                    RobustScaler(),
+                    SVR(kernel='rbf', C=5.0, epsilon=0.05, gamma='auto')
+                ),
+                'ElasticNet': make_pipeline(
+                    RobustScaler(),
+                    ElasticNet(alpha=0.001, l1_ratio=0.9, random_state=42)
                 ),
                 'Extra Trees': make_pipeline(
                     RobustScaler(),
                     ExtraTreesRegressor(
-                        n_estimators=300,       # Increased from 200
-                        max_depth=None,
-                        min_samples_leaf=1,     # Most granular
-                        min_samples_split=2,
-                        max_features=0.6,        # More aggressive subsampling
-                        bootstrap=True,          # Enable bootstrap
-                        random_state=42,
-                        n_jobs=-1,
-                        warm_start=True
-                    )
-                ),
-                'XGBoost': make_pipeline(       # New model
-                    RobustScaler(),
-                    XGBRegressor(
                         n_estimators=200,
-                        learning_rate=0.05,
-                        max_depth=4,
-                        subsample=0.8,
-                        colsample_bytree=0.8,
+                        max_depth=None,
+                        min_samples_leaf=2,
                         random_state=42,
                         n_jobs=-1
                     )
                 )
             }
             
-            # Train and evaluate with progress tracking
+            # Train and evaluate
             results = {}
-            with st.spinner(f'Training models for {target}...'):
-                for name, pipeline in pipelines.items():
-                    try:
-                        pipeline.fit(X_train, y_train)
-                        pred = pipeline.predict(X_test)
-                        
-                        # Cross-validation with error handling
-                        cv_scores = cross_val_score(
-                            pipeline, X, y, cv=cv, scoring='r2'
-                        )
-                        
-                        results[name] = {
-                            'model': pipeline,
-                            'test_r2': r2_score(y_test, pred),
-                            'test_mse': mean_squared_error(y_test, pred),
-                            'cv_r2_mean': np.mean(cv_scores),
-                            'cv_r2_std': np.std(cv_scores),
-                            'features': X.columns.tolist()
-                        }
-                    except Exception as e:
-                        st.warning(f"Failed to train {name} for {target}: {str(e)}")
+            for name, pipeline in pipelines.items():
+                try:
+                    pipeline.fit(X_train, y_train)
+                    pred = pipeline.predict(X_test)
+                    
+                    cv_scores = cross_val_score(
+                        pipeline, X, y, cv=cv, scoring='r2'
+                    )
+                    
+                    results[name] = {
+                        'model': pipeline,
+                        'test_r2': r2_score(y_test, pred),
+                        'test_mse': mean_squared_error(y_test, pred),
+                        'cv_r2_mean': np.mean(cv_scores),
+                        'cv_r2_std': np.std(cv_scores),
+                        'features': X.columns.tolist()
+                    }
+                except Exception as e:
+                    st.warning(f"Failed to train {name} for {target}: {str(e)}")
             
             models[target] = results
             
