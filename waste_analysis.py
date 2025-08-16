@@ -3,8 +3,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.linear_model import Ridge
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge, ElasticNet
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.svm import SVR
 from sklearn.model_selection import cross_val_score, train_test_split, KFold
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler
@@ -133,7 +134,7 @@ def train_models(df):
                 X, y, test_size=0.2, random_state=42
             )
             
-            # Model pipelines
+            # Model pipelines - Added 3 new models
             pipelines = {
                 'Ridge': make_pipeline(
                     RobustScaler(),
@@ -147,6 +148,23 @@ def train_models(df):
                         min_samples_leaf=10,
                         random_state=42
                     )
+                ),
+                'Gradient Boosting': make_pipeline(
+                    RobustScaler(),
+                    GradientBoostingRegressor(
+                        n_estimators=100,
+                        learning_rate=0.1,
+                        max_depth=3,
+                        random_state=42
+                    )
+                ),
+                'SVR': make_pipeline(
+                    RobustScaler(),
+                    SVR(kernel='rbf', C=1.0, epsilon=0.1)
+                ),
+                'ElasticNet': make_pipeline(
+                    RobustScaler(),
+                    ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
                 )
             }
             
