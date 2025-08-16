@@ -37,9 +37,9 @@ def load_and_prepare_data():
         # Columns to remove
         cols_to_drop = [
             'Prov', 'Year_Thai', 'Pop', 'Age_0_5','Age_6_17', 'Age_18_24', 'Age_25_44', 'Age_45_64','Age_65plus', 
-            'SAO', 'MSW_GenRate(kg/c/d)', 
-            'HH_Income_Avg', 'LAO_Special', 'City_Muni', 
-            'Town_Muni', 'Subdist_Muni', 'District_BKK', 'Year', 'Pop_Density', 'GPP_per_Capita', 'Employed', 'Unemployed'
+            'SAO', 'MSW_GenRate(kg/c/d)', 'Area_km2', 'Employed', 'Unemployed',
+            'LAO_Special', 'City_Muni', 'GPP_per_Capita',
+            'Town_Muni', 'Subdist_Muni', 'District_BKK', 'Year', 'Pop_Density'
         ]
         
         # Remove specified columns if they exist
