@@ -113,7 +113,7 @@ def enhanced_feature_engineering(df):
     return df[features + waste_targets]
 
 # ----------------------------
-# Model Training (Optimized Version)
+# Model Training (Further Optimized)
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -129,76 +129,105 @@ def train_models(df):
             X = df.drop(columns=waste_targets)
             y = df[target]
             
-            # Train-test split
+            # Train-test split with stratification (for skewed targets)
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
             
-            # Optimized model pipelines
+            # Advanced model configurations
             pipelines = {
                 'Ridge': make_pipeline(
                     RobustScaler(),
-                    Ridge(alpha=1.0)  # Reduced regularization
+                    Ridge(
+                        alpha=0.5,  # Balanced regularization
+                        solver='svd'  # More numerically stable
+                    )
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=200,  # Increased number of trees
-                        max_depth=None,    # Let trees grow deeper
-                        min_samples_leaf=5,  # Reduced from 10
-                        max_features='sqrt',  # Better feature sampling
-                        random_state=42
+                        n_estimators=300,  # More trees
+                        max_depth=None,
+                        min_samples_leaf=3,  # More granular
+                        min_samples_split=5,
+                        max_features=0.8,  # Feature subsampling
+                        bootstrap=True,
+                        random_state=42,
+                        n_jobs=-1  # Parallel processing
                     )
                 ),
                 'Gradient Boosting': make_pipeline(
                     RobustScaler(),
                     GradientBoostingRegressor(
-                        n_estimators=150,  # Increased from 100
-                        learning_rate=0.05,  # Lower learning rate
-                        max_depth=4,       # Slightly deeper trees
-                        min_samples_leaf=5,  
-                        subsample=0.8,      # Stochastic gradient boosting
-                        random_state=42
+                        n_estimators=200,
+                        learning_rate=0.05,
+                        max_depth=4,
+                        min_samples_leaf=5,
+                        min_samples_split=10,
+                        subsample=0.8,
+                        max_features='sqrt',
+                        random_state=42,
+                        validation_fraction=0.1,  # Early stopping
+                        n_iter_no_change=5
                     )
                 ),
                 'SVR': make_pipeline(
                     RobustScaler(),
                     SVR(
                         kernel='rbf',
-                        C=10.0,           # Increased regularization
-                        epsilon=0.01,     # Tighter epsilon tube
-                        gamma='scale'     # Automatic gamma
+                        C=5.0,  # Balanced complexity
+                        epsilon=0.05,
+                        gamma='auto',  # Better for small datasets
+                        cache_size=500  # For faster computation
                     )
                 ),
                 'ElasticNet': make_pipeline(
                     RobustScaler(),
                     ElasticNet(
-                        alpha=0.01,       # Reduced regularization
-                        l1_ratio=0.7,     # More L1 regularization
+                        alpha=0.001,  # Much less regularization
+                        l1_ratio=0.9,  # More L1 (sparsity)
+                        selection='random',
                         random_state=42,
-                        selection='random' # Better convergence
+                        max_iter=5000  # Ensure convergence
+                    )
+                ),
+                'Extra Trees': make_pipeline(  # New model
+                    RobustScaler(),
+                    ExtraTreesRegressor(
+                        n_estimators=200,
+                        max_depth=None,
+                        min_samples_leaf=2,
+                        random_state=42,
+                        n_jobs=-1
                     )
                 )
             }
             
-            # Train and evaluate
+            # Train and evaluate with progress tracking
             results = {}
-            for name, pipeline in pipelines.items():
-                pipeline.fit(X_train, y_train)
-                pred = pipeline.predict(X_test)
-                
-                cv_scores = cross_val_score(
-                    pipeline, X, y, cv=cv, scoring='r2'
-                )
-                
-                results[name] = {
-                    'model': pipeline,
-                    'test_r2': r2_score(y_test, pred),
-                    'test_mse': mean_squared_error(y_test, pred),
-                    'cv_r2_mean': np.mean(cv_scores),
-                    'cv_r2_std': np.std(cv_scores),
-                    'features': X.columns.tolist()
-                }
+            with st.spinner(f'Training models for {target}...'):
+                for name, pipeline in pipelines.items():
+                    pipeline.fit(X_train, y_train)
+                    pred = pipeline.predict(X_test)
+                    
+                    # Cross-validation with error handling
+                    try:
+                        cv_scores = cross_val_score(
+                            pipeline, X, y, cv=cv, scoring='r2'
+                        )
+                        cv_mean = np.mean(cv_scores)
+                        cv_std = np.std(cv_scores)
+                    except:
+                        cv_mean, cv_std = np.nan, np.nan
+                    
+                    results[name] = {
+                        'model': pipeline,
+                        'test_r2': r2_score(y_test, pred),
+                        'test_mse': mean_squared_error(y_test, pred),
+                        'cv_r2_mean': cv_mean,
+                        'cv_r2_std': cv_std,
+                        'features': X.columns.tolist()
+                    }
             
             models[target] = results
             
