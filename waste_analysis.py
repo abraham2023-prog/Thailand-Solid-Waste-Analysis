@@ -113,7 +113,7 @@ def enhanced_feature_engineering(df):
     return df[features + waste_targets]
 
 # ----------------------------
-# Model Training (Further Optimized)
+# Model Training
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -129,105 +129,63 @@ def train_models(df):
             X = df.drop(columns=waste_targets)
             y = df[target]
             
-            # Train-test split with stratification (for skewed targets)
+            # Train-test split
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42
             )
             
-            # Advanced model configurations
+            # Model pipelines - Added 3 new models
             pipelines = {
                 'Ridge': make_pipeline(
                     RobustScaler(),
-                    Ridge(
-                        alpha=0.5,  # Balanced regularization
-                        solver='svd'  # More numerically stable
-                    )
+                    Ridge(alpha=10.0)
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=300,  # More trees
-                        max_depth=None,
-                        min_samples_leaf=3,  # More granular
-                        min_samples_split=5,
-                        max_features=0.8,  # Feature subsampling
-                        bootstrap=True,
-                        random_state=42,
-                        n_jobs=-1  # Parallel processing
+                        n_estimators=100,
+                        max_depth=3,
+                        min_samples_leaf=10,
+                        random_state=42
                     )
                 ),
                 'Gradient Boosting': make_pipeline(
                     RobustScaler(),
                     GradientBoostingRegressor(
-                        n_estimators=200,
-                        learning_rate=0.05,
-                        max_depth=4,
-                        min_samples_leaf=5,
-                        min_samples_split=10,
-                        subsample=0.8,
-                        max_features='sqrt',
-                        random_state=42,
-                        validation_fraction=0.1,  # Early stopping
-                        n_iter_no_change=5
+                        n_estimators=100,
+                        learning_rate=0.1,
+                        max_depth=3,
+                        random_state=42
                     )
                 ),
                 'SVR': make_pipeline(
                     RobustScaler(),
-                    SVR(
-                        kernel='rbf',
-                        C=5.0,  # Balanced complexity
-                        epsilon=0.05,
-                        gamma='auto',  # Better for small datasets
-                        cache_size=500  # For faster computation
-                    )
+                    SVR(kernel='rbf', C=1.0, epsilon=0.1)
                 ),
                 'ElasticNet': make_pipeline(
                     RobustScaler(),
-                    ElasticNet(
-                        alpha=0.001,  # Much less regularization
-                        l1_ratio=0.9,  # More L1 (sparsity)
-                        selection='random',
-                        random_state=42,
-                        max_iter=5000  # Ensure convergence
-                    )
-                ),
-                'Extra Trees': make_pipeline(  # New model
-                    RobustScaler(),
-                    ExtraTreesRegressor(
-                        n_estimators=200,
-                        max_depth=None,
-                        min_samples_leaf=2,
-                        random_state=42,
-                        n_jobs=-1
-                    )
+                    ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
                 )
             }
             
-            # Train and evaluate with progress tracking
+            # Train and evaluate
             results = {}
-            with st.spinner(f'Training models for {target}...'):
-                for name, pipeline in pipelines.items():
-                    pipeline.fit(X_train, y_train)
-                    pred = pipeline.predict(X_test)
-                    
-                    # Cross-validation with error handling
-                    try:
-                        cv_scores = cross_val_score(
-                            pipeline, X, y, cv=cv, scoring='r2'
-                        )
-                        cv_mean = np.mean(cv_scores)
-                        cv_std = np.std(cv_scores)
-                    except:
-                        cv_mean, cv_std = np.nan, np.nan
-                    
-                    results[name] = {
-                        'model': pipeline,
-                        'test_r2': r2_score(y_test, pred),
-                        'test_mse': mean_squared_error(y_test, pred),
-                        'cv_r2_mean': cv_mean,
-                        'cv_r2_std': cv_std,
-                        'features': X.columns.tolist()
-                    }
+            for name, pipeline in pipelines.items():
+                pipeline.fit(X_train, y_train)
+                pred = pipeline.predict(X_test)
+                
+                cv_scores = cross_val_score(
+                    pipeline, X, y, cv=cv, scoring='r2'
+                )
+                
+                results[name] = {
+                    'model': pipeline,
+                    'test_r2': r2_score(y_test, pred),
+                    'test_mse': mean_squared_error(y_test, pred),
+                    'cv_r2_mean': np.mean(cv_scores),
+                    'cv_r2_std': np.std(cv_scores),
+                    'features': X.columns.tolist()
+                }
             
             models[target] = results
             
