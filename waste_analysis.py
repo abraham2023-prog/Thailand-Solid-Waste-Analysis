@@ -113,7 +113,7 @@ def enhanced_feature_engineering(df):
     return df[features + waste_targets]
 
 # ----------------------------
-# Model Training
+# Model Training (Optimized Version)
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -134,37 +134,50 @@ def train_models(df):
                 X, y, test_size=0.2, random_state=42
             )
             
-            # Model pipelines - Added 3 new models
+            # Optimized model pipelines
             pipelines = {
                 'Ridge': make_pipeline(
                     RobustScaler(),
-                    Ridge(alpha=10.0)
+                    Ridge(alpha=1.0)  # Reduced regularization
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=100,
-                        max_depth=3,
-                        min_samples_leaf=10,
+                        n_estimators=200,  # Increased number of trees
+                        max_depth=None,    # Let trees grow deeper
+                        min_samples_leaf=5,  # Reduced from 10
+                        max_features='sqrt',  # Better feature sampling
                         random_state=42
                     )
                 ),
                 'Gradient Boosting': make_pipeline(
                     RobustScaler(),
                     GradientBoostingRegressor(
-                        n_estimators=100,
-                        learning_rate=0.1,
-                        max_depth=3,
+                        n_estimators=150,  # Increased from 100
+                        learning_rate=0.05,  # Lower learning rate
+                        max_depth=4,       # Slightly deeper trees
+                        min_samples_leaf=5,  
+                        subsample=0.8,      # Stochastic gradient boosting
                         random_state=42
                     )
                 ),
                 'SVR': make_pipeline(
                     RobustScaler(),
-                    SVR(kernel='rbf', C=1.0, epsilon=0.1)
+                    SVR(
+                        kernel='rbf',
+                        C=10.0,           # Increased regularization
+                        epsilon=0.01,     # Tighter epsilon tube
+                        gamma='scale'     # Automatic gamma
+                    )
                 ),
                 'ElasticNet': make_pipeline(
                     RobustScaler(),
-                    ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42)
+                    ElasticNet(
+                        alpha=0.01,       # Reduced regularization
+                        l1_ratio=0.7,     # More L1 regularization
+                        random_state=42,
+                        selection='random' # Better convergence
+                    )
                 )
             }
             
