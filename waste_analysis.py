@@ -108,7 +108,7 @@ def enhanced_feature_engineering(df):
     return df[features + waste_targets]
 
 # ----------------------------
-# Model Training (Optimized)
+# Model Training (Optimized without XGBoost)
 # ----------------------------
 @st.cache_resource
 def train_models(df):
@@ -131,48 +131,56 @@ def train_models(df):
             
             # Optimized model pipelines
             pipelines = {
-                'Ridge': make_pipeline(
+                'Gradient Boosting': make_pipeline(
                     RobustScaler(),
-                    Ridge(alpha=0.5, solver='svd')
+                    GradientBoostingRegressor(
+                        n_estimators=250,
+                        learning_rate=0.03,
+                        max_depth=5,
+                        min_samples_leaf=3,
+                        min_samples_split=8,
+                        subsample=0.7,
+                        max_features='sqrt',
+                        random_state=42,
+                        validation_fraction=0.1,
+                        n_iter_no_change=10
+                    )
                 ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
-                        n_estimators=300,
+                        n_estimators=350,
                         max_depth=None,
-                        min_samples_leaf=3,
-                        max_features=0.8,
+                        min_samples_leaf=2,
+                        min_samples_split=5,
+                        max_features=0.7,
+                        bootstrap=True,
                         random_state=42,
-                        n_jobs=-1
+                        n_jobs=-1,
+                        warm_start=True
                     )
-                ),
-                'Gradient Boosting': make_pipeline(
-                    RobustScaler(),
-                    GradientBoostingRegressor(
-                        n_estimators=200,
-                        learning_rate=0.05,
-                        max_depth=4,
-                        min_samples_leaf=5,
-                        subsample=0.8,
-                        random_state=42
-                    )
-                ),
-                'SVR': make_pipeline(
-                    RobustScaler(),
-                    SVR(kernel='rbf', C=5.0, epsilon=0.05, gamma='auto')
-                ),
-                'ElasticNet': make_pipeline(
-                    RobustScaler(),
-                    ElasticNet(alpha=0.001, l1_ratio=0.9, random_state=42)
                 ),
                 'Extra Trees': make_pipeline(
                     RobustScaler(),
                     ExtraTreesRegressor(
-                        n_estimators=200,
+                        n_estimators=300,
                         max_depth=None,
-                        min_samples_leaf=2,
+                        min_samples_leaf=1,
+                        min_samples_split=2,
+                        max_features=0.6,
+                        bootstrap=True,
                         random_state=42,
-                        n_jobs=-1
+                        n_jobs=-1,
+                        warm_start=True
+                    )
+                ),
+                'ElasticNet': make_pipeline(
+                    RobustScaler(),
+                    ElasticNet(
+                        alpha=0.001,
+                        l1_ratio=0.9,
+                        random_state=42,
+                        max_iter=5000
                     )
                 )
             }
