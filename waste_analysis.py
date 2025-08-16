@@ -6,7 +6,6 @@ import plotly.express as px
 from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor
 from sklearn.svm import SVR
-from xgboost import XGBRegressor
 from sklearn.model_selection import cross_val_score, train_test_split, KFold
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler
