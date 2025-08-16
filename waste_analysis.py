@@ -39,7 +39,7 @@ def load_and_prepare_data():
             'Prov', 'Year_Thai', 'Pop', 'Age_0_5','Age_6_17', 'Age_18_24', 'Age_25_44', 'Age_45_64','Age_65plus', 
             'SAO', 'MSW_GenRate(kg/c/d)', 
             'HH_Income_Avg', 'LAO_Special', 'City_Muni', 
-            'Town_Muni', 'Subdist_Muni', 'District_BKK', 'Year', 'Pop_Density'
+            'Town_Muni', 'Subdist_Muni', 'District_BKK', 'Year', 'Pop_Density', 'GPP_per_Capita'
         ]
         
         # Remove specified columns if they exist
