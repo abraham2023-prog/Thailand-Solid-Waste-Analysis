@@ -34,6 +34,20 @@ def load_and_prepare_data():
         csv_path = os.path.join(script_dir, 'SW_Thailand_2021_Labeled.csv')
         df = pd.read_csv(csv_path)
         
+        # Columns to remove
+        cols_to_drop = [
+            'Prov', 'Year_Thai', 'Pop', 'Age_6_17', 'Age_45_64', 
+            'No_Households', 'SAO', 'MSW_GenRate(kg/c/d)', 
+            'HH_Income_Avg', 'LAO_Special', 'City_Muni', 
+            'Town_Muni', 'Subdist_Muni', 'District_BKK'
+        ]
+        
+        # Remove specified columns if they exist
+        existing_cols_to_drop = [col for col in cols_to_drop if col in df.columns]
+        if existing_cols_to_drop:
+            df = df.drop(columns=existing_cols_to_drop)
+            st.warning(f"Removed specified columns: {existing_cols_to_drop}")
+        
         # Data Quality Report
         with st.expander("🔍 Initial Data Quality Report", expanded=True):
             st.write("### Missing Values Before Processing")
@@ -65,7 +79,10 @@ def enhanced_feature_engineering(df):
     waste_targets = ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste']
     
     # Basic feature engineering
-    if 'Area' in df.columns and 'Pop' in df.columns:
+    if 'Area' in df.columns and 'Pop' not in df.columns:  # Since we're removing Pop
+        # If you have another population column you want to use, change this
+        st.warning("Population column not available for density calculation")
+    elif 'Area' in df.columns:
         df['Population_Density'] = df['Pop'] / (df['Area'] + 1e-6)
     
     if all(col in df.columns for col in ['GPP_Agriculture(%)', 'GPP_Industrial(%)', 'GPP_Services(%)']):
