@@ -38,7 +38,7 @@ def load_and_prepare_data():
         cols_to_drop = [
             'Prov', 'Year_Thai', 'Pop', 'Age_0_5','Age_6_17', 'Age_18_24', 'Age_25_44', 'Age_45_64','Age_65plus', 
             'SAO', 'MSW_GenRate(kg/c/d)', 'Area_km2', 'Employed', 'Unemployed',
-            'LAO_Special', 'City_Muni', 'GPP_per_Capita', 'MSW_Reclycled', 
+            'LAO_Special', 'City_Muni', 'GPP_per_Capita', 'MSW_Reclycled', 'Male', 'Female', 'cluster', 
             'Town_Muni', 'Subdist_Muni', 'District_BKK', 'Year', 'Pop_Density'
         ]
         
