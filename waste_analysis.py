@@ -3,9 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
-from sklearn.linear_model import Ridge, ElasticNet
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, ExtraTreesRegressor
-from sklearn.svm import SVR
 from sklearn.model_selection import cross_val_score, train_test_split, KFold
 from sklearn.metrics import r2_score, mean_squared_error
 from sklearn.preprocessing import RobustScaler
@@ -48,7 +46,7 @@ def load_and_prepare_data():
         existing_cols_to_drop = [col for col in cols_to_drop if col in df.columns]
         if existing_cols_to_drop:
             df = df.drop(columns=existing_cols_to_drop)
-            st.warning(f"Removed specified columns: {existing_cols_to_drop}")
+            # st.warning(f"Removed specified columns: {existing_cols_to_drop}")
         
         # Data Quality Report
         with st.expander("🔍 Initial Data Quality Report", expanded=True):
@@ -59,13 +57,13 @@ def load_and_prepare_data():
             # Remove non-numeric columns
             non_numeric_cols = df.select_dtypes(exclude=['number']).columns
             if len(non_numeric_cols) > 0:
-                st.warning(f"Removing non-numeric columns: {list(non_numeric_cols)}")
+                # st.warning(f"Removing non-numeric columns: {list(non_numeric_cols)}")
                 df = df.drop(columns=non_numeric_cols)
             
             # Remove completely empty columns
             empty_cols = df.columns[df.isnull().all()]
             if len(empty_cols) > 0:
-                st.warning(f"Removing empty columns: {list(empty_cols)}")
+                # st.warning(f"Removing empty columns: {list(empty_cols)}")
                 df = df.drop(columns=empty_cols)
 
         return df
@@ -94,7 +92,7 @@ def enhanced_feature_engineering(df):
     # Find features with correlation greater than 0.8
     to_drop = [column for column in upper.columns if any(upper[column] > 0.8)]
     if len(to_drop) > 0:
-        st.warning(f"Removing highly correlated features: {to_drop}")
+        # st.warning(f"Removing highly correlated features: {to_drop}")
         features = [f for f in features if f not in to_drop]
     
     # Handle missing values
@@ -131,10 +129,6 @@ def train_models(df):
             
             # Optimized model pipelines
             pipelines = {
-                'Ridge': make_pipeline(
-                    RobustScaler(),
-                    Ridge(alpha=0.5, solver='svd')
-                ),
                 'Random Forest': make_pipeline(
                     RobustScaler(),
                     RandomForestRegressor(
@@ -156,14 +150,6 @@ def train_models(df):
                         subsample=0.8,
                         random_state=42
                     )
-                ),
-                'SVR': make_pipeline(
-                    RobustScaler(),
-                    SVR(kernel='rbf', C=5.0, epsilon=0.05, gamma='auto')
-                ),
-                'ElasticNet': make_pipeline(
-                    RobustScaler(),
-                    ElasticNet(alpha=0.001, l1_ratio=0.9, random_state=42)
                 ),
                 'Extra Trees': make_pipeline(
                     RobustScaler(),
