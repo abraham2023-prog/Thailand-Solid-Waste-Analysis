@@ -232,7 +232,7 @@ def plot_waste_distribution(df):
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Thailand Waste Prediction System Pro")
+    st.title("🇹🇭 Thailand Waste Prediction System")
     st.markdown("Optimized waste generation prediction with correlation-based feature selection")
     
     # Load data
@@ -294,7 +294,7 @@ def main():
         
         for i, feature in enumerate(features):
             with cols[i % 3]:
-                if feature == 'Cluster':
+                if feature == 'cluster':
                     # Cluster dropdown
                     input_data[feature] = st.selectbox(
                         feature,
@@ -302,7 +302,7 @@ def main():
                         index=0,
                         help="Select the economic cluster type"
                     )
-                elif feature in ['Pop_density', 'Male', 'Female', 'Visitors (Ppl)']:
+                elif feature in ['Pop_Total', 'Male', 'Female', 'Visitors(ppl)']:
                     # Whole number inputs
                     min_val = int(df[feature].min())
                     max_val = int(df[feature].max())
