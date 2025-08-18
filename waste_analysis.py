@@ -12,6 +12,7 @@ from sklearn.experimental import enable_iterative_imputer
 from sklearn.impute import IterativeImputer
 from sklearn.pipeline import make_pipeline
 import os
+import io
 
 # ----------------------------
 # Page Configuration
@@ -225,10 +226,55 @@ def plot_waste_distribution(df):
         st.error(f"Could not plot waste distribution: {str(e)}")
 
 # ----------------------------
+# Batch Prediction Functions
+# ----------------------------
+def process_uploaded_file(uploaded_file, cluster_mapping):
+    try:
+        # Read the uploaded file
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
+        
+        # Convert cluster names to numerical values if needed
+        if 'Cluster' in df.columns:
+            if df['Cluster'].dtype == 'object':
+                df['Cluster'] = df['Cluster'].map(cluster_mapping)
+        
+        return df
+    except Exception as e:
+        st.error(f"Error processing file: {str(e)}")
+        return None
+
+def make_batch_predictions(df, models, target, model_choice):
+    try:
+        # Get the model and required features
+        model = models[target][model_choice]['model']
+        required_features = models[target][model_choice]['features']
+        
+        # Check if all required features are present
+        missing_features = [f for f in required_features if f not in df.columns]
+        if missing_features:
+            st.error(f"Missing required features in uploaded file: {', '.join(missing_features)}")
+            return None
+        
+        # Make predictions
+        predictions = model.predict(df[required_features])
+        
+        # Create results dataframe
+        results = df.copy()
+        results[f'Predicted_{target}'] = predictions
+        
+        return results
+    except Exception as e:
+        st.error(f"Prediction failed: {str(e)}")
+        return None
+
+# ----------------------------
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Thailand Waste Prediction System Pro")
+    st.title("🇹🇭 Thailand Waste Prediction Platform")
     st.markdown("Optimized waste generation prediction with correlation-based feature selection")
     
     # Load data
@@ -248,11 +294,20 @@ def main():
     # Train models
     models = train_models(df)
     
+    # Define cluster mapping
+    cluster_mapping = {
+        'Agricultural': 0,
+        'Tourism': 1,
+        'Urban': 2,
+        'Mixed Economies': 3,
+        'Industrial': 4
+    }
+    
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["📊 Predictions", "📈 Analysis", "🗂️ Data Explorer"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Predictions", "📈 Analysis", "🗂️ Data Explorer", "📁 Batch Predictions"])
     
     with tab1:
-        st.header("Waste Generation Predictions")
+        st.header("Single Prediction")
         
         # Check if models exist
         if not models:
@@ -285,23 +340,13 @@ def main():
         input_data = {}
         features = models[target][model_choice]['features']
         
-        # Define cluster mapping (user-friendly names to numerical values)
-        cluster_mapping = {
-            'Agricultural': 0,
-            'Tourism': 1,
-            'Urban': 2,
-            'Mixed Economies': 3,
-            'Industrial': 4
-        }
-        cluster_options = list(cluster_mapping.keys())
-        
         for i, feature in enumerate(features):
             with cols[i % 3]:
                 if feature == 'cluster':
                     # Cluster dropdown with user-friendly names
                     selected_cluster = st.selectbox(
                         "Economic Cluster Type",
-                        options=cluster_options,
+                        options=list(cluster_mapping.keys()),
                         index=0,
                         help="Select the economic cluster type"
                     )
@@ -393,6 +438,72 @@ def main():
             st.plotly_chart(fig, use_container_width=True)
         except Exception as e:
             st.error(f"Could not generate correlation matrix: {str(e)}")
+    
+    with tab4:
+        st.header("Batch Predictions from CSV/Excel")
+        st.write("Upload a file containing data for multiple predictions")
+        
+        # File uploader
+        uploaded_file = st.file_uploader(
+            "Choose a CSV or Excel file",
+            type=['csv', 'xlsx'],
+            accept_multiple_files=False
+        )
+        
+        if uploaded_file is not None:
+            # Get available targets
+            available_targets = [t for t in ['Food_Waste', 'Gen_Waste', 'Recycl_Waste', 'Hazard_Waste'] 
+                              if t in models and models[t]]
+            
+            if not available_targets:
+                st.error("No prediction targets available")
+                st.stop()
+            
+            # Process the uploaded file
+            df_upload = process_uploaded_file(uploaded_file, cluster_mapping)
+            
+            if df_upload is not None:
+                st.success("File successfully uploaded and processed!")
+                st.write("Preview of uploaded data:")
+                st.dataframe(df_upload.head())
+                
+                # Prediction options
+                target = st.selectbox(
+                    "Select Waste Type to Predict",
+                    options=available_targets,
+                    key='batch_target'
+                )
+                
+                # Get available models for selected target
+                model_choices = [m for m in models[target].keys() if m in models[target]]
+                if not model_choices:
+                    st.error(f"No models available for {target}")
+                    st.stop()
+                
+                model_choice = st.selectbox(
+                    "Select Prediction Model",
+                    options=model_choices,
+                    format_func=lambda x: f"{x} (Test R²: {models[target][x]['test_r2']:.3f})",
+                    key='batch_model'
+                )
+                
+                if st.button("Run Batch Predictions", type="primary"):
+                    with st.spinner("Making predictions..."):
+                        results = make_batch_predictions(df_upload, models, target, model_choice)
+                    
+                    if results is not None:
+                        st.success("Predictions completed successfully!")
+                        st.write("Preview of results:")
+                        st.dataframe(results.head())
+                        
+                        # Download button for results
+                        csv = results.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="Download Predictions as CSV",
+                            data=csv,
+                            file_name=f'waste_predictions_{target}.csv',
+                            mime='text/csv'
+                        )
 
 if __name__ == "__main__":
     main()
