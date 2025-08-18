@@ -284,23 +284,56 @@ def main():
             format_func=lambda x: f"{x} (Test R²: {models[target][x]['test_r2']:.3f})"
         )
         
-        # Create input sliders
+        # Create input controls
         cols = st.columns(3)
         input_data = {}
         features = models[target][model_choice]['features']
         
+        # Define cluster options
+        cluster_options = ['Agricultural', 'Tourism', 'Mixed Economies', 'Industrial', 'Urban']
+        
         for i, feature in enumerate(features):
             with cols[i % 3]:
-                input_data[feature] = st.slider(
-                    feature,
-                    float(df[feature].min()),
-                    float(df[feature].max()),
-                    float(df[feature].median()),
-                    help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
-                )
+                if feature == 'Cluster':
+                    # Cluster dropdown
+                    input_data[feature] = st.selectbox(
+                        feature,
+                        options=cluster_options,
+                        index=0,
+                        help="Select the economic cluster type"
+                    )
+                elif feature in ['Pop_density', 'Male', 'Female', 'Visitors (Ppl)']:
+                    # Whole number inputs
+                    min_val = int(df[feature].min())
+                    max_val = int(df[feature].max())
+                    default_val = int(df[feature].median())
+                    input_data[feature] = st.number_input(
+                        feature,
+                        min_value=min_val,
+                        max_value=max_val,
+                        value=default_val,
+                        step=1,
+                        help=f"Range: {min_val} to {max_val}"
+                    )
+                else:
+                    # Default slider for other features
+                    input_data[feature] = st.slider(
+                        feature,
+                        float(df[feature].min()),
+                        float(df[feature].max()),
+                        float(df[feature].median()),
+                        help=f"Range: {df[feature].min():.2f} to {df[feature].max():.2f}"
+                    )
         
         if st.button("Predict Waste Generation", type="primary"):
             try:
+                # Convert cluster selection to numerical value if needed
+                if 'Cluster' in input_data:
+                    # This assumes your model expects numerical values for Cluster
+                    # You may need to adjust this mapping based on your actual data encoding
+                    cluster_mapping = {option: idx for idx, option in enumerate(cluster_options)}
+                    input_data['Cluster'] = cluster_mapping[input_data['Cluster']]
+                
                 X_input = pd.DataFrame([input_data])
                 model = models[target][model_choice]['model']
                 pred = model.predict(X_input)[0]
