@@ -46,7 +46,6 @@ def load_and_prepare_data():
         existing_cols_to_drop = [col for col in cols_to_drop if col in df.columns]
         if existing_cols_to_drop:
             df = df.drop(columns=existing_cols_to_drop)
-            # st.warning(f"Removed specified columns: {existing_cols_to_drop}")
         
         # Data Quality Report
         with st.expander("🔍 Initial Data Quality Report", expanded=True):
@@ -57,13 +56,11 @@ def load_and_prepare_data():
             # Remove non-numeric columns
             non_numeric_cols = df.select_dtypes(exclude=['number']).columns
             if len(non_numeric_cols) > 0:
-                # st.warning(f"Removing non-numeric columns: {list(non_numeric_cols)}")
                 df = df.drop(columns=non_numeric_cols)
             
             # Remove completely empty columns
             empty_cols = df.columns[df.isnull().all()]
             if len(empty_cols) > 0:
-                # st.warning(f"Removing empty columns: {list(empty_cols)}")
                 df = df.drop(columns=empty_cols)
 
         return df
@@ -92,7 +89,6 @@ def enhanced_feature_engineering(df):
     # Find features with correlation greater than 0.8
     to_drop = [column for column in upper.columns if any(upper[column] > 0.8)]
     if len(to_drop) > 0:
-        # st.warning(f"Removing highly correlated features: {to_drop}")
         features = [f for f in features if f not in to_drop]
     
     # Handle missing values
@@ -232,7 +228,7 @@ def plot_waste_distribution(df):
 # Main Application
 # ----------------------------
 def main():
-    st.title("🇹🇭 Thailand Waste Prediction System")
+    st.title("🇹🇭 Thailand Waste Prediction System Pro")
     st.markdown("Optimized waste generation prediction with correlation-based feature selection")
     
     # Load data
@@ -289,26 +285,35 @@ def main():
         input_data = {}
         features = models[target][model_choice]['features']
         
-        # Define cluster options
-        cluster_options = ['Agricultural', 'Tourism', 'Mixed Economies', 'Industrial', 'Urban']
+        # Define cluster mapping (user-friendly names to numerical values)
+        cluster_mapping = {
+            'Agricultural': 0,
+            'Tourism': 1,
+            'Urban': 2,
+            'Mixed Economies': 3,
+            'Industrial': 4
+        }
+        cluster_options = list(cluster_mapping.keys())
         
         for i, feature in enumerate(features):
             with cols[i % 3]:
                 if feature == 'cluster':
-                    # Cluster dropdown
-                    input_data[feature] = st.selectbox(
-                        feature,
+                    # Cluster dropdown with user-friendly names
+                    selected_cluster = st.selectbox(
+                        "Economic Cluster Type",
                         options=cluster_options,
                         index=0,
                         help="Select the economic cluster type"
                     )
+                    # Store the numerical value for prediction
+                    input_data[feature] = cluster_mapping[selected_cluster]
                 elif feature in ['Pop_Total', 'Male', 'Female', 'Visitors(ppl)']:
                     # Whole number inputs
                     min_val = int(df[feature].min())
                     max_val = int(df[feature].max())
                     default_val = int(df[feature].median())
                     input_data[feature] = st.number_input(
-                        feature,
+                        feature.replace("_", " "),
                         min_value=min_val,
                         max_value=max_val,
                         value=default_val,
@@ -318,7 +323,7 @@ def main():
                 else:
                     # Default slider for other features
                     input_data[feature] = st.slider(
-                        feature,
+                        feature.replace("_", " "),
                         float(df[feature].min()),
                         float(df[feature].max()),
                         float(df[feature].median()),
@@ -327,13 +332,6 @@ def main():
         
         if st.button("Predict Waste Generation", type="primary"):
             try:
-                # Convert cluster selection to numerical value if needed
-                if 'Cluster' in input_data:
-                    # This assumes your model expects numerical values for Cluster
-                    # You may need to adjust this mapping based on your actual data encoding
-                    cluster_mapping = {option: idx for idx, option in enumerate(cluster_options)}
-                    input_data['Cluster'] = cluster_mapping[input_data['Cluster']]
-                
                 X_input = pd.DataFrame([input_data])
                 model = models[target][model_choice]['model']
                 pred = model.predict(X_input)[0]
@@ -342,6 +340,12 @@ def main():
                 st.write(f"Model: {model_choice}")
                 st.write(f"Test R²: {models[target][model_choice]['test_r2']:.3f}")
                 st.write(f"CV R²: {models[target][model_choice]['cv_r2_mean']:.3f} ± {models[target][model_choice]['cv_r2_std']:.3f}")
+                
+                # Show the selected cluster name in results
+                if 'Cluster' in input_data:
+                    reverse_mapping = {v: k for k, v in cluster_mapping.items()}
+                    selected_cluster_name = reverse_mapping[input_data['Cluster']]
+                    st.write(f"Economic Cluster: {selected_cluster_name}")
             except Exception as e:
                 st.error(f"Prediction failed: {str(e)}")
     
