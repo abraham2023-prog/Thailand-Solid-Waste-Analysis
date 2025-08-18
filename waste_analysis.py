@@ -17,7 +17,7 @@ import os
 # Page Configuration
 # ----------------------------
 st.set_page_config(
-    page_title="Thailand Waste Analysis Pro",
+    page_title="Thailand Waste Analysis",
     page_icon="♻️",
     layout="wide"
 )
